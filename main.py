@@ -7,39 +7,36 @@ from supabase import create_client, Client
 app = Flask(__name__)
 client = Anthropic()
 
-# Conexión directa a tu nueva base de datos de Supabase usando las variables de Railway
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
-
-# Inicializamos el cliente de Supabase
+# Conexión automática con tus variables de Render
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def cargar_inventario_supabase():
-    """Trae TODOS tus botones desde Supabase sin límites de Google Sheets."""
+    """Trae todo el catálogo desde la tabla de Supabase."""
     try:
-        # Hacemos la consulta a la tabla exacta que creamos juntos
-        response = supabase.table("inventario_botones").select("*").execute()
-        return response.data
+        respuesta = supabase.table("inventario_botones").select("*").execute()
+        return respuesta.data
     except Exception as e:
-        print(f"Error cargando inventario desde Supabase: {e}")
+        print(f"Error consultando Supabase: {e}")
         return []
 
 def consultar_ia(pregunta: str, inventario: list) -> str:
-    """Envía la pregunta y el inventario a Claude y retorna la respuesta priorizando inventario."""
+    """Envía la pregunta y el catálogo a Claude con las reglas comerciales."""
     inv_str = str(inventario) 
 
     prompt = f"""Eres el asistente de inventario de botones de una empresa textil. Tu objetivo es orientar al vendedor con precisión y ayudar a mover el inventario de forma inteligente.
 Responde SIEMPRE en español, de forma breve y clara (máximo 6 líneas).
 
-INVENTARIO ACTUAL DESDE BASE DE DATOS:
+INVENTARIO ACTUAL DESDE BASE DE DATOS (SUPABASE):
 {inv_str}
 
 El vendedor pregunta: "{pregunta}"
 
 Instrucciones CRÍTICAS de respuesta y lógica comercial:
-- Si el vendedor busca por características generales (ej: "camisero", "brillante", "blanco") sin dar un código específico, NO te limites al primer resultado. Busca todos los modelos que coincidan y ordénalos de manera que muestres **PRIMERO aquellos modelos que tengan el MAYOR STOCK disponible** (para ayudar a rotar el producto con exceso).
+- Si el vendedor busca por características generales (ej: "camisero", "brillante", "blanco") sin dar un código específico, busca todos los modelos que coincidan en la base de datos y ordénalos de manera que muestres **PRIMERO aquellos modelos que tengan el MAYOR STOCK disponible** (para ayudar a rotar el producto con exceso o rezagado).
 - Coloca una bombilla 💡 junto al modelo con más stock y añade una breve nota de sugerencia (ej: "💡 Modelo altamente sugerido por alta disponibilidad").
-- Si preguntan por un CÓDIGO o MODELO específico, ahí sí busca todas las variantes de ese código y ordénalas por tamaño de forma ASCENDENTE (de menor a mayor tamaño).
+- Si preguntan por un CÓDIGO o MODELO específico, busca todas las variantes de ese código y ordénalas por tamaño de forma ASCENDENTE (de menor a mayor tamaño).
 - REGLA DE CONVERSIÓN TEXTIL CRÍTICA: En nuestro negocio, 1 MAZO equivale exactamente a 1,728 unidades (piezas). Si un vendedor te pregunta por mazos, multiplica la cantidad de mazos por 1,728 para obtener las piezas totales requeridas y compáralas contra el 'stock' disponible para validar si alcanza.
 - Muestra siempre: código COMPLETO, modelo, tamaño, hoyos, acabado, tono, uso, stock disponible y el link de la imagen.
 - Formato WhatsApp: usa emojis, saltos de línea para separar opciones, sin markdown ni asteriscos.
@@ -60,13 +57,13 @@ def webhook():
 
     print(f"Mensaje de {numero_vendedor}: {mensaje_entrante}")
 
-    # Ahora cargamos desde Supabase
+    # Carga los datos desde Supabase
     inventario = cargar_inventario_supabase()
 
     if not inventario:
         respuesta_texto = "⚠️ No pude conectar con la base de datos de Supabase en este momento. Intenta en unos segundos."
     else:
-        respuesta_texto = consultar_ia(mensaje_entrante, inventario)
+        respuesta_texto = consular_ia(mensaje_entrante, inventario)
 
     resp = MessagingResponse()
     resp.message(respuesta_texto)
@@ -74,7 +71,7 @@ def webhook():
 
 @app.route("/", methods=["GET"])
 def health():
-    return "✅ Bot de inventario activo y conectado a Supabase", 200
+    return "✅ Bot de botones corriendo estable en Supabase", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
