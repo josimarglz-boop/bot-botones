@@ -63,7 +63,7 @@ def webhook():
     if not inventario:
         respuesta_texto = "⚠️ No pude conectar con la base de datos de Supabase en este momento. Intenta en unos segundos."
     else:
-        respuesta_texto = consular_ia(mensaje_entrante, inventario)
+        respuesta_texto = consultar_ia(mensaje_entrante, inventario)
 
     resp = MessagingResponse()
     resp.message(respuesta_texto)
