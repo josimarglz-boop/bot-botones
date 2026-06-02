@@ -25,11 +25,10 @@ def cargar_inventario_supabase():
         return []
 
 def consultar_ia(pregunta: str, inventario: list) -> str:
-    """Envía la pregunta y el inventario a Claude y retorna la respuesta."""
-    # Como Supabase es súper ligero, ahora sí le pasamos el catálogo completo a Claude
+    """Envía la pregunta y el inventario a Claude y retorna la respuesta priorizando inventario."""
     inv_str = str(inventario) 
 
-    prompt = f"""Eres el asistente de inventario de botones de una empresa textil.
+    prompt = f"""Eres el asistente de inventario de botones de una empresa textil. Tu objetivo es orientar al vendedor con precisión y ayudar a mover el inventario de forma inteligente.
 Responde SIEMPRE en español, de forma breve y clara (máximo 6 líneas).
 
 INVENTARIO ACTUAL DESDE BASE DE DATOS:
@@ -37,13 +36,13 @@ INVENTARIO ACTUAL DESDE BASE DE DATOS:
 
 El vendedor pregunta: "{pregunta}"
 
-Instrucciones CRÍTICAS:
-- Si preguntan por un CÓDIGO específico (ej: B5871-R), busca EXACTAMENTE ese código en el inventario.
-- Los códigos pueden tener sufijos (-R, -L, -M, -B, etc.) que indican variantes — respétalos.
-- Si el código exacto NO existe, busca códigos que empiecen igual.
-- Para búsquedas por características (talla, hoyos, material, color, teñible), filtra con lógica inteligente.
-- Muestra: código COMPLETO, modelo, talla (tamano), hoyos, acabado, tono, uso, tags, stock y el link de la imagen.
-- Formato WhatsApp: usa emojis, saltos de línea, sin markdown ni asteriscos.
+Instrucciones CRÍTICAS de respuesta y lógica comercial:
+- Si el vendedor busca por características generales (ej: "camisero", "brillante", "blanco") sin dar un código específico, NO te limites al primer resultado. Busca todos los modelos que coincidan y ordénalos de manera que muestres **PRIMERO aquellos modelos que tengan el MAYOR STOCK disponible** (para ayudar a rotar el producto con exceso).
+- Coloca una bombilla 💡 junto al modelo con más stock y añade una breve nota de sugerencia (ej: "💡 Modelo altamente sugerido por alta disponibilidad").
+- Si preguntan por un CÓDIGO o MODELO específico, ahí sí busca todas las variantes de ese código y ordénalas por tamaño de forma ASCENDENTE (de menor a mayor tamaño).
+- REGLA DE CONVERSIÓN TEXTIL CRÍTICA: En nuestro negocio, 1 MAZO equivale exactamente a 1,728 unidades (piezas). Si un vendedor te pregunta por mazos, multiplica la cantidad de mazos por 1,728 para obtener las piezas totales requeridas y compáralas contra el 'stock' disponible para validar si alcanza.
+- Muestra siempre: código COMPLETO, modelo, tamaño, hoyos, acabado, tono, uso, stock disponible y el link de la imagen.
+- Formato WhatsApp: usa emojis, saltos de línea para separar opciones, sin markdown ni asteriscos.
 """
 
     message = client.messages.create(
