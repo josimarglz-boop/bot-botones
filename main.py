@@ -84,7 +84,7 @@ Instrucciones:
 
     # Identificador oficial de Haiku para producción
     message = client.messages.create(
-        model="claude-haiku-4-5"
+        model="claude-haiku-4-5",
         max_tokens=500,
         temperature=0.1,
         messages=[{"role": "user", "content": prompt}]
