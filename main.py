@@ -28,14 +28,17 @@ def cargar_inventario_supabase(pregunta: str):
         for palabra in palabras:
             if palabra in saludos:
                 continue
-            # Buscamos coincidencias en Modelo o Uso, limitando a 5 respuestas máximo por palabra
+            # Buscamos de forma híbrida respetando las mayúsculas/acentos de tu columna
             res_modelo = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{palabra}%").limit(5).execute()
             res_uso = supabase.table("inventario_botones").select("*").ilike("Uso", f"%{palabra}%").limit(5).execute()
+            res_cat = supabase.table("inventario_botones").select("*").ilike("Categoría", f"%{palabra}%").limit(5).execute() # <-- Identico a Supabase
             
             if res_modelo.data:
                 resultados.extend(res_modelo.data)
             if res_uso.data:
                 resultados.extend(res_uso.data)
+            if res_cat.data:
+                resultados.extend(res_cat.data)
 
         # Eliminar duplicados y recortar a un máximo de 6 productos totales para proteger el bolsillo
         resultados_unicos = {f['id']: f for f in resultados}.values()
