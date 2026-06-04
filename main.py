@@ -1,3 +1,4 @@
+
 import os
 import re
 from flask import Flask, request
@@ -8,69 +9,203 @@ from supabase import create_client, Client
 app = Flask(__name__)
 client = Anthropic()
 
-# Conexión automática con tus variables de Render
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def cargar_inventario_supabase(pregunta: str):
-    """Busca de forma ultra estricta en Supabase para enviar el mínimo de datos a la IA."""
+    """Búsqueda ULTRA ESPECÍFICA adaptada a tu BD: Botones, Cintas, Resortes, etc."""
     try:
-        # Extraer palabras clave limpias
-        palabras = [p.strip().lower() for p in re.findall(r'\b\w+\b', pregunta) if len(p) > 2]
+        pregunta_lower = pregunta.lower()
         
-        # Si no hay palabras clave o es un saludo corto, NO mandamos inventario (ahorro total)
-        saludos = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa"]
-        if not palabras or all(p in saludos for p in palabras):
+        # Saludos cortos → no gastar tokens
+        saludos = ["hola", "buenos", "gracias", "ok", "si", "no"]
+        if all(s in pregunta_lower for s in saludos) or len(pregunta_lower) < 3:
             return []
 
         resultados = []
-        for palabra in palabras:
-            if palabra in saludos:
-                continue
-            # Buscamos de forma híbrida respetando las mayúsculas/acentos de tu columna
-            res_modelo = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{palabra}%").limit(5).execute()
-            res_uso = supabase.table("inventario_botones").select("*").ilike("Uso", f"%{palabra}%").limit(5).execute()
-            res_cat = supabase.table("inventario_botones").select("*").ilike("Categoría", f"%{palabra}%").limit(5).execute() # <-- Identico a Supabase
-            
-            if res_modelo.data:
-                resultados.extend(res_modelo.data)
-            if res_uso.data:
-                resultados.extend(res_uso.data)
-            if res_cat.data:
-                resultados.extend(res_cat.data)
 
-        # Eliminar duplicados y recortar a un máximo de 6 productos totales para proteger el bolsillo
-        resultados_unicos = {f['id']: f for f in resultados}.values()
-        return list(resultados_unicos)[:6]
+        # =============== 1. BÚSQUEDA POR MODELO EXACTO ===============
+        # Buscar códigos como B0003, B0330, B1240, etc.
+        modelo_match = re.search(r'\b[B][0-9]{3,4}\b', pregunta, re.IGNORECASE)
+        if modelo_match:
+            modelo = modelo_match.group().upper()
+            try:
+                res = supabase.table("inventario_botones").select("*").eq("Modelo", modelo).limit(10).execute()
+                if res.data:
+                    # Si además pidió tamaño específico, filtrar
+                    tamaño_match = re.search(r'(?:talla|tamaño|linea|línea)\s*(\d+)', pregunta)
+                    if tamaño_match:
+                        tamaño = int(tamaño_match.group(1))
+                        res_filtrado = [r for r in res.data if r.get('Tamaño') == tamaño]
+                        if res_filtrado:
+                            return res_filtrado[:6]
+                    return res.data[:6]
+            except Exception as e:
+                print(f"Error búsqueda por modelo: {e}")
 
-    except Exception as e:
-        print(f"Error filtrando en Supabase: {e}")
+        # =============== 2. BÚSQUEDA POR CATEGORÍA ===============
+        # Si pregunta por "cinta", "resorte", "hilo", etc.
+        categorias_palabras = {
+            "cinta": "Cinta",
+            "resorte": "Resorte",
+            "hilo": "Hilo",
+            "botón": "Botón",
+            "encaje": "Encaje",
+            "elástico": "Elástico",
+            "cinta métrica": "Cinta Métrica"
+        }
+        
+        for palabra, categoria in categorias_palabras.items():
+            if palabra in pregunta_lower:
+                try:
+                    res = supabase.table("inventario_botones").select("*").eq("Categoría", categoria).limit(8).execute()
+                    if res.data:
+                        return res.data[:8]
+                except Exception as e:
+                    print(f"Error búsqueda por categoría: {e}")
+
+        # =============== 3. BÚSQUEDA POR CRITERIOS ESPECÍFICOS (para botones) ===============
+        query = supabase.table("inventario_botones").select("*")
+        criterios_aplicados = False
+
+        # Tamaño
+        tamaño_match = re.search(r'(?:talla|tamaño|linea|línea)\s*(\d+)', pregunta)
+        if tamaño_match:
+            tamaño = int(tamaño_match.group(1))
+            try:
+                query = query.eq("Tamaño", tamaño)
+                criterios_aplicados = True
+            except:
+                pass
+
+        # Hoyos: "2 hoyos", "4 hoyos", "de pata"
+        if "2 hoyo" in pregunta_lower or "dos hoyo" in pregunta_lower:
+            try:
+                query = query.eq("Hoyos", "2 hoyos")
+                criterios_aplicados = True
+            except:
+                pass
+        elif "4 hoyo" in pregunta_lower or "cuatro hoyo" in pregunta_lower:
+            try:
+                query = query.eq("Hoyos", "4 hoyos")
+                criterios_aplicados = True
+            except:
+                pass
+        elif "pata" in pregunta_lower:
+            try:
+                query = query.eq("Hoyos", "De Pata")
+                criterios_aplicados = True
+            except:
+                pass
+
+        # Tono/Color: Blanco, Dorado, Níquel, Oro Rosa, etc.
+        tonos = ["blanco", "dorado", "níquel", "niquelado", "oro rosa", "plata", "plateado", "negro", "gris"]
+        for tono_palabra in tonos:
+            if tono_palabra in pregunta_lower:
+                # Mapeo a valores reales de tu BD
+                tono_map = {
+                    "blanco": "Blanco",
+                    "dorado": "Dorado",
+                    "níquel": "Níquel",
+                    "niquelado": "Níquel",
+                    "oro rosa": "Oro Rosa",
+                    "plata": "Plata",
+                    "plateado": "Plata"
+                }
+                tono_real = tono_map.get(tono_palabra, tono_palabra.capitalize())
+                try:
+                    query = query.eq("Tono", tono_real)
+                    criterios_aplicados = True
+                    break
+                except:
+                    pass
+
+        # Uso: Camisero, Sastre, Fantasía
+        if "camisero" in pregunta_lower or "camisa" in pregunta_lower:
+            try:
+                query = query.eq("Uso", "Camisero")
+                criterios_aplicados = True
+            except:
+                pass
+        elif "sastre" in pregunta_lower or "pantalón" in pregunta_lower or "saco" in pregunta_lower:
+            try:
+                query = query.eq("Uso", "Sastre")
+                criterios_aplicados = True
+            except:
+                pass
+        elif "fantasía" in pregunta_lower or "vintage" in pregunta_lower or "decorativo" in pregunta_lower:
+            try:
+                query = query.eq("Uso", "Fantasía")
+                criterios_aplicados = True
+            except:
+                pass
+
+        # TAGS: Teñible, Básico, Formal, elegante, etc.
+        if "teñible" in pregunta_lower or "teñir" in pregunta_lower or "tinte" in pregunta_lower:
+            try:
+                # Buscar en TAGS que contenga "Teñible"
+                query = query.ilike("TAGS", "%Teñible%")
+                criterios_aplicados = True
+            except:
+                pass
+
+        if criterios_aplicados:
+            try:
+                res = query.limit(6).execute()
+                if res.data:
+                    return res.data
+            except Exception as e:
+                print(f"Error aplicando criterios: {e}")
+
+        # =============== 4. BÚSQUEDA FUZZY POR PALABRAS CLAVE ===============
+        # Última opción: buscar en Modelo, TAGS, etc. por similitud
+        palabras = [p.strip().lower() for p in re.findall(r'\b\w{3,}\b', pregunta) 
+                   if len(p) > 2 and p not in saludos and p not in ["del", "una", "para", "que", "los", "las", "por", "talla"]]
+        
+        for palabra in palabras[:2]:  # Máximo 2 palabras para no gastar tokens
+            try:
+                res_modelo = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{palabra}%").limit(4).execute()
+                res_tags = supabase.table("inventario_botones").select("*").ilike("TAGS", f"%{palabra}%").limit(4).execute()
+                
+                if res_modelo.data:
+                    return res_modelo.data[:6]
+                if res_tags.data:
+                    return res_tags.data[:6]
+            except:
+                pass
+
         return []
 
+    except Exception as e:
+        print(f"Error general en filtrado: {e}")
+        return []
+
+
 def consultar_ia(pregunta: str, inventario: list) -> str:
-    """Envía la consulta al modelo económico Haiku con los datos estrictamente necesarios."""
-    inv_str = str(inventario) 
+    """Envía a Haiku los datos filtrados para respuesta económica."""
+    inv_str = str(inventario)
 
-    prompt = f"""Eres "Botoncín" 🧵, el asistente virtual de la tienda de insumos textiles. Responde SIEMPRE en español, alegre, muy breve (máximo 5 líneas) y directo al grano.
+    prompt = f"""Eres "Botoncín" 🧵, el asistente de insumos textiles. Responde en español, breve (máximo 5 líneas), alegre y directo.
 
-INVENTARIO DISPONIBLE (SÓLO USA ESTOS DATOS):
+DATOS DISPONIBLES (USA SOLO ESTOS):
 {inv_str}
 
 Pregunta: "{pregunta}"
 
-Instrucciones:
-1. SALUDO: Si te saludan, di "¡Hola! Soy Botoncín 🧵" y pregunta qué modelo buscan. Si van directo a una consulta, NO te presentes, ve al grano.
-2. SIN STOCK/RESULTADOS: Si el inventario está vacío o no coincide, indica amablemente que no encontraste stock disponible para ese modelo exacto.
-3. LOGICA COMERCIAL: Ordena por tamaño ascendente. Si el stock es 0, usa la 'fecha_llegada' (ej: 🚚 Próxima llegada: 15 de Junio). Si es menor a 500 piezas, avisa que quedan pocas unidades. 1 mazo = 1728 pzs, 1 gruesa = 144 pzs.
-4. FORMATO DE RESPUESTA INTELIGENTE POR CATEGORÍA:
-   - Armas una descripción natural y fluida según el producto.
-   - Si es un BOTÓN: Muestra Código, Modelo, Tamaño, Stock, Fecha de llegada (si aplica) y el Link de la imagen.
-   - Si es OTRO PRODUCTO (Cintas, Resortes, etc.): Genera una descripción general e intuitiva en una sola línea combinando sus datos (ej: "Cinta palmita de 20mm en color crudo"), seguido del Stock disponible, Fecha de llegada (si aplica) y su Link de imagen.
-   - En ningún caso uses asteriscos dobles (**). Usa saltos de línea limpios y emojis para separar la información.
+INSTRUCCIONES:
+1. SALUDO: Si te saludan, di "¡Hola! Soy Botoncín 🧵 ¿Qué modelo buscas?". Si van directo, ve al grano.
+2. SIN RESULTADOS: Si el inventario está vacío, di amablemente que no encontraste ese modelo exacto.
+3. FORMATO DE RESPUESTA:
+   • Modelo, Tamaño, Hoyos, Tono, Stock disponible
+   • Si Stock < 500 pzs: avisa "Pocas unidades"
+   • Si Stock = 0: muestra "Próxima llegada: [fecha]" si existe fecha_llegada
+   • Si tiene Imagen, muestra el link
+   • Usa emojis naturales, sin asteriscos dobles
+4. CONVERSIÓN: 1 mazo = 1,728 pzs, 1 gruesa = 144 pzs. Si piden "3 mazos", calcula pzs necesarias vs stock
+5. SMART TAGS: Si la búsqueda menciona "teñible" y los TAGS incluyen eso, resáltalo
 """
 
-    # Cambiamos al modelo claude-3-5-haiku para reducir el costo un 90%
     message = client.messages.create(
         model="claude-haiku-4-5",
         max_tokens=500,
@@ -79,12 +214,12 @@ Instrucciones:
     )
     return message.content[0].text
 
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     """Recibe mensajes de WhatsApp vía Twilio."""
     mensaje_entrante = request.form.get("Body", "").strip()
     
-    # Carga solo lo necesario
     inventario = cargar_inventario_supabase(mensaje_entrante)
     respuesta_texto = consultar_ia(mensaje_entrante, inventario)
 
@@ -92,9 +227,11 @@ def webhook():
     resp.message(respuesta_texto)
     return str(resp)
 
+
 @app.route("/", methods=["GET"])
 def health():
-    return "✅ Botoncín Híbrido y Económico corriendo en Render", 200
+    return "✅ Botoncín Ultra-Específico en Render", 200
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
