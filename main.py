@@ -24,20 +24,31 @@ def cargar_inventario_supabase(pregunta: str):
         if not palabras_inspeccion or all(p in saludos for p in palabras_inspeccion):
             return []
 
-        # Limpiamos plurales comunes de forma rápida para mejorar el acierto en las columnas de texto
-        pregunta_limpia = re.sub(r'(botones|camiseros|teñibles|cintas|elasticos)\b', lambda m: m.group(1)[:-1], pregunta_limpia)
+        # Reemplazo estricto de palabras completas para no romper términos como "plastiflecha"
+        mapeo_singulares = {
+            "botones": "botón",
+            "camiseros": "camisero",
+            "teñibles": "teñible",
+            "cintas": "cinta",
+            "elasticos": "elastico",
+            "elásticos": "elastico"
+        }
+        
+        palabras_limpias = []
+        for p in palabras_inspeccion:
+            # Si la palabra exacta está en nuestro mapa, la transformamos, si no, pasa idéntica
+            palabras_limpias.append(mapeo_singulares.get(p, p))
 
         resultados = []
         # Tomamos las 2 palabras más importantes que no sean saludos para enfocar la puntería
-        palabras_clave = [p for p in palabras_inspeccion if p not in saludos][:2]
+        palabras_clave = [p for p in palabras_limpias if p not in saludos][:2]
 
         if palabras_clave:
-            # Si hay al menos una palabra clave, buscamos de forma amplia usando la primera (origen)
             p1 = palabras_clave[0]
-            # Quitamos la 's' final de la palabra clave si la tiene para buscar en singular
-            if p1.endswith('s') and len(p1) > 3: 
-                p1 = p1[:-1]
+            # Si termina en 's' de forma general (plural básico), guardamos una versión en singular para probar
+            p1_sin_s = p1[:-1] if (p1.endswith('s') and len(p1) > 3) else p1
 
+            # Buscamos en Supabase usando la palabra limpia
             res_modelo = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{p1}%").limit(10).execute()
             res_uso = supabase.table("inventario_botones").select("*").ilike("Uso", f"%{p1}%").limit(10).execute()
             res_cat = supabase.table("inventario_botones").select("*").ilike("Categoría", f"%{p1}%").limit(10).execute()
@@ -46,11 +57,20 @@ def cargar_inventario_supabase(pregunta: str):
             if res_uso.data: resultados.extend(res_uso.data)
             if res_cat.data: resultados.extend(res_cat.data)
 
-        # Si se usaron dos palabras clave (ej: "camisero" y "18"), filtramos en caliente para dejar los más exactos
+            # Si no dio resultados, intentamos rápido quitando la 's' por si escribieron un plural genérico
+            if not resultados and p1 != p1_sin_s:
+                res_modelo_s = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{p1_sin_s}%").limit(10).execute()
+                res_uso_s = supabase.table("inventario_botones").select("*").ilike("Uso", f"%{p1_sin_s}%").limit(10).execute()
+                res_cat_s = supabase.table("inventario_botones").select("*").ilike("Categoría", f"%{p1_sin_s}%").limit(10).execute()
+                
+                if res_modelo_s.data: resultados.extend(res_modelo_s.data)
+                if res_uso_s.data: resultados.extend(res_uso_s.data)
+                if res_cat_s.data: resultados.extend(res_cat_s.data)
+
+        # Si se usaron dos palabras clave (ej: "camisero" y "18"), filtramos en caliente
         if len(palabras_clave) > 1:
             p2 = palabras_clave[1]
-            if p2.endswith('s') and len(p2) > 3: 
-                p2 = p2[:-1]
+            p2_sin_s = p2[:-1] if (p2.endswith('s') and len(p2) > 3) else p2
             
             filtrados_exactos = [
                 r for r in resultados 
@@ -58,11 +78,14 @@ def cargar_inventario_supabase(pregunta: str):
                 or p2 in str(r.get("Uso", "")).lower() 
                 or p2 in str(r.get("Categoría", "")).lower() 
                 or p2 in str(r.get("Tamaño", "")).lower()
+                or p2_sin_s in str(r.get("Modelo", "")).lower()
+                or p2_sin_s in str(r.get("Uso", "")).lower()
+                or p2_sin_s in str(r.get("Categoría", "")).lower()
             ]
             if filtrados_exactos:
                 resultados = filtrados_exactos
 
-        # Eliminar duplicados y recortar estrictamente a un máximo de 6 para cuidar el bolsillo
+        # Eliminar duplicados y recortar estrictamente a un máximo de 6
         resultados_unicos = {f['id']: f for f in resultados}.values()
         return list(resultados_unicos)[:6]
 
