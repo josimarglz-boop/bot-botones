@@ -60,7 +60,11 @@ Instrucciones:
 1. SALUDO: Si te saludan, di "¡Hola! Soy Botoncín 🧵" y pregunta qué modelo buscan. Si van directo a una consulta, NO te presentes, ve al grano.
 2. SIN STOCK/RESULTADOS: Si el inventario está vacío o no coincide, indica amablemente que no encontraste stock disponible para ese modelo exacto.
 3. LOGICA COMERCIAL: Ordena por tamaño ascendente. Si el stock es 0, usa la 'fecha_llegada' (ej: 🚚 Próxima llegada: 15 de Junio). Si es menor a 500 piezas, avisa que quedan pocas unidades. 1 mazo = 1728 pzs, 1 gruesa = 144 pzs.
-4. FORMATO: Muestra código, modelo, tamaño, stock, fecha llegada (si aplica) y el link de imagen. Usa saltos de línea. NO USES asteriscos dobles (**).
+4. FORMATO DE RESPUESTA INTELIGENTE POR CATEGORÍA:
+   - Armas una descripción natural y fluida según el producto.
+   - Si es un BOTÓN: Muestra Código, Modelo, Tamaño, Stock, Fecha de llegada (si aplica) y el Link de la imagen.
+   - Si es OTRO PRODUCTO (Cintas, Resortes, etc.): Genera una descripción general e intuitiva en una sola línea combinando sus datos (ej: "Cinta palmita de 20mm en color crudo"), seguido del Stock disponible, Fecha de llegada (si aplica) y su Link de imagen.
+   - En ningún caso uses asteriscos dobles (**). Usa saltos de línea limpios y emojis para separar la información.
 """
 
     # Cambiamos al modelo claude-3-5-haiku para reducir el costo un 90%
@@ -87,7 +91,7 @@ def webhook():
 
 @app.route("/", methods=["GET"])
 def health():
-    return "✅ Botoncín Económico corriendo en Render", 200
+    return "✅ Botoncín Híbrido y Económico corriendo en Render", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
