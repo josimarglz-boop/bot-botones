@@ -14,45 +14,49 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def cargar_inventario_supabase(pregunta: str):
-    """Busca en Supabase palabra por palabra de forma limpia y robusta."""
+    """Busca en Supabase usando la frase clave de forma directa y unificada."""
     try:
         pregunta_limpia = pregunta.strip().lower()
         
-        # Filtro básico de saludos para ahorrar tokens
-        saludos = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa", "dame", "opciones"]
+        # Filtro de saludos e instrucciones para limpiar el texto
+        saludos = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa", "dame", "opciones", "botón", "boton"]
         
-        # Ahora permitimos números de 2 dígitos (como tamaño 14, 18, 24) cambiando el límite a > 1
+        # Extraemos palabras individuales
         palabras = [p.strip().lower() for p in re.findall(r'\b\w+\b', pregunta_limpia) if len(p) > 1]
-        
         if not palabras or all(p in saludos for p in palabras):
             return []
 
+        # Filtramos los términos de búsqueda reales (ej: "camisero", "teñible", "cpa-10b")
+        terminos_reales = [p for p in palabras if p not in saludos]
+        if not terminos_reales:
+            return []
+
         resultados = []
-        for palabra in palabras:
-            if palabra in saludos:
-                continue
-                
-            # Buscamos en las 3 columnas de tu base de datos
-            res_modelo = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{palabra}%").limit(5).execute()
-            res_uso = supabase.table("inventario_botones").select("*").ilike("Uso", f"%{palabra}%").limit(5).execute()
-            res_cat = supabase.table("inventario_botones").select("*").ilike("Categoría", f"%{palabra}%").limit(5).execute()
-            
-            if res_modelo.data:
-                resultados.extend(res_modelo.data)
-            if res_uso.data:
-                resultados.extend(res_uso.data)
-            if res_cat.data:
-                resultados.extend(res_cat.data)
+        
+        # Usamos el término principal de búsqueda para traer coincidencias directas
+        termino_principal = terminos_reales[0]
+        
+        # Consultas limpias a Supabase
+        res_modelo = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{termino_principal}%").limit(10).execute()
+        res_uso = supabase.table("inventario_botones").select("*").ilike("Uso", f"%{termino_principal}%").limit(10).execute()
+        res_cat = supabase.table("inventario_botones").select("*").ilike("Categoría", f"%{termino_principal}%").limit(10).execute()
+        
+        if res_modelo.data: resultados.extend(res_modelo.data)
+        if res_uso.data: resultados.extend(res_uso.data)
+        if res_cat.data: resultados.extend(res_cat.data)
 
-        # Si el usuario especificó un tamaño numérico (ej: "18"), filtramos en caliente para darle prioridad
-        numeros_en_pregunta = [p for p in palabras if p.isdigit()]
-        if numeros_en_pregunta and resultados:
-            num = numeros_en_pregunta[0]
-            filtrados_por_tamano = [r for r in resultados if str(r.get("Tamaño", "")) == num or num in str(r.get("Modelo", ""))]
-            if filtrados_por_tamano:
-                resultados = filtrados_por_tamano
+        # Si el usuario incluyó una segunda palabra descriptiva (ej: "teñible" o "18"), filtramos los resultados obtenidos
+        if len(terminos_reales) > 1:
+            for t in terminos_reales[1:]:
+                resultados = [
+                    r for r in resultados 
+                    if t in str(r.get("Modelo", "")).lower() 
+                    or t in str(r.get("Uso", "")).lower() 
+                    or t in str(r.get("Categoría", "")).lower()
+                    or t in str(r.get("Tamaño", "")).lower()
+                ]
 
-        # Eliminar duplicados por ID y recortar estrictamente a 6 para cuidar el dinero
+        # Eliminar duplicados por ID y limitar estrictamente a 6 para cuidar el dinero
         resultados_unicos = {f['id']: f for f in resultados}.values()
         return list(resultados_unicos)[:6]
 
@@ -64,7 +68,7 @@ def consultar_ia(pregunta: str, inventario: list) -> str:
     """Envía la consulta al modelo económico Haiku oficial con los datos estrictamente necesarios."""
     inv_str = str(inventario) 
 
-    prompt = f"""Eres "Botoncín" 🧵, el asistente virtual de la tienda de insumos textiles. Responde SIEMPRE en español, alegre, muy breve (máximo 5 líneas) and directo al grano.
+    prompt = f"""Eres "Botoncín" 🧵, el asistente virtual de la tienda de insumos textiles. Responde SIEMPRE en español, alegre, muy breve (máximo 5 líneas) y directo al grano.
 
 INVENTARIO DISPONIBLE (SÓLO USA ESTOS DATOS):
 {inv_str}
@@ -82,9 +86,8 @@ Instrucciones:
    - En ningún caso uses asteriscos dobles (**). Usa saltos de línea limpios y emojis para separar la información.
 """
 
-    # Identificador oficial de Haiku para producción
     message = client.messages.create(
-        model="claude-haiku-4-5",
+        model="claude-4-5-haiku",
         max_tokens=500,
         temperature=0.1,
         messages=[{"role": "user", "content": prompt}]
