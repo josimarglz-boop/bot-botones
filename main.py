@@ -14,87 +14,39 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def cargar_inventario_supabase(pregunta: str):
-    """Busca en Supabase de forma inteligente y unificada para evitar pérdidas de stock."""
+    """Busca de forma ultra estricta en Supabase para enviar el mínimo de datos a la IA."""
     try:
-        pregunta_limpia = pregunta.strip().lower()
+        # Extraer palabras clave limpias
+        palabras = [p.strip().lower() for p in re.findall(r'\b\w+\b', pregunta) if len(p) > 2]
         
-        # Filtro de saludos idéntico para ahorro total de tokens
+        # Si no hay palabras clave o es un saludo corto, NO mandamos inventario (ahorro total)
         saludos = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa"]
-        palabras_inspeccion = [p for p in re.findall(r'\b\w+\b', pregunta_limpia) if len(p) > 2]
-        if not palabras_inspeccion or all(p in saludos for p in palabras_inspeccion):
+        if not palabras or all(p in saludos for p in palabras):
             return []
 
-        # Reemplazo estricto de palabras completas para no romper términos como "plastiflecha"
-        mapeo_singulares = {
-            "botones": "botón",
-            "camiseros": "camisero",
-            "teñibles": "teñible",
-            "cintas": "cinta",
-            "elasticos": "elastico",
-            "elásticos": "elastico"
-        }
-        
-        palabras_limpias = []
-        for p in palabras_inspeccion:
-            # Si la palabra exacta está en nuestro mapa, la transformamos, si no, pasa idéntica
-            palabras_limpias.append(mapeo_singulares.get(p, p))
-
         resultados = []
-        # Tomamos las 2 palabras más importantes que no sean saludos para enfocar la puntería
-        palabras_clave = [p for p in palabras_limpias if p not in saludos][:2]
-
-        if palabras_clave:
-            p1 = palabras_clave[0]
-            # Si termina en 's' de forma general (plural básico), guardamos una versión en singular para probar
-            p1_sin_s = p1[:-1] if (p1.endswith('s') and len(p1) > 3) else p1
-
-            # Buscamos en Supabase usando la palabra limpia
-            res_modelo = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{p1}%").limit(10).execute()
-            res_uso = supabase.table("inventario_botones").select("*").ilike("Uso", f"%{p1}%").limit(10).execute()
-            res_cat = supabase.table("inventario_botones").select("*").ilike("Categoría", f"%{p1}%").limit(10).execute()
-
-            if res_modelo.data: resultados.extend(res_modelo.data)
-            if res_uso.data: resultados.extend(res_uso.data)
-            if res_cat.data: resultados.extend(res_cat.data)
-
-            # Si no dio resultados, intentamos rápido quitando la 's' por si escribieron un plural genérico
-            if not resultados and p1 != p1_sin_s:
-                res_modelo_s = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{p1_sin_s}%").limit(10).execute()
-                res_uso_s = supabase.table("inventario_botones").select("*").ilike("Uso", f"%{p1_sin_s}%").limit(10).execute()
-                res_cat_s = supabase.table("inventario_botones").select("*").ilike("Categoría", f"%{p1_sin_s}%").limit(10).execute()
-                
-                if res_modelo_s.data: resultados.extend(res_modelo_s.data)
-                if res_uso_s.data: resultados.extend(res_uso_s.data)
-                if res_cat_s.data: resultados.extend(res_cat_s.data)
-
-        # Si se usaron dos palabras clave (ej: "camisero" y "18"), filtramos en caliente
-        if len(palabras_clave) > 1:
-            p2 = palabras_clave[1]
-            p2_sin_s = p2[:-1] if (p2.endswith('s') and len(p2) > 3) else p2
+        for palabra in palabras:
+            if palabra in saludos:
+                continue
+            # Buscamos coincidencias en Modelo o Uso, limitando a 5 respuestas máximo por palabra
+            res_modelo = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{palabra}%").limit(5).execute()
+            res_uso = supabase.table("inventario_botones").select("*").ilike("Uso", f"%{palabra}%").limit(5).execute()
             
-            filtrados_exactos = [
-                r for r in resultados 
-                if p2 in str(r.get("Modelo", "")).lower() 
-                or p2 in str(r.get("Uso", "")).lower() 
-                or p2 in str(r.get("Categoría", "")).lower() 
-                or p2 in str(r.get("Tamaño", "")).lower()
-                or p2_sin_s in str(r.get("Modelo", "")).lower()
-                or p2_sin_s in str(r.get("Uso", "")).lower()
-                or p2_sin_s in str(r.get("Categoría", "")).lower()
-            ]
-            if filtrados_exactos:
-                resultados = filtrados_exactos
+            if res_modelo.data:
+                resultados.extend(res_modelo.data)
+            if res_uso.data:
+                resultados.extend(res_uso.data)
 
-        # Eliminar duplicados y recortar estrictamente a un máximo de 6
+        # Eliminar duplicados y recortar a un máximo de 6 productos totales para proteger el bolsillo
         resultados_unicos = {f['id']: f for f in resultados}.values()
         return list(resultados_unicos)[:6]
 
     except Exception as e:
-        print(f"Error optimizado en Supabase: {e}")
+        print(f"Error filtrando en Supabase: {e}")
         return []
 
 def consultar_ia(pregunta: str, inventario: list) -> str:
-    """Envía la consulta al modelo Sonnet con límites estrictos de tokens y formato pulido."""
+    """Envía la consulta al modelo económico Haiku con los datos estrictamente necesarios."""
     inv_str = str(inventario) 
 
     prompt = f"""Eres "Botoncín" 🧵, el asistente virtual de la tienda de insumos textiles. Responde SIEMPRE en español, alegre, muy breve (máximo 5 líneas) y directo al grano.
@@ -115,9 +67,9 @@ Instrucciones:
    - En ningún caso uses asteriscos dobles (**). Usa saltos de línea limpios y emojis para separar la información.
 """
 
-    # Usamos el modelo Sonnet que está activo en tu cuenta, pero ultra blindado por los filtros previos
+    # Cambiamos al modelo claude-3-5-haiku para reducir el costo un 90%
     message = client.messages.create(
-        model="claude-haiku-4-5",
+        model="claude-3-5-haiku-20241022",
         max_tokens=500,
         temperature=0.1,
         messages=[{"role": "user", "content": prompt}]
@@ -129,7 +81,7 @@ def webhook():
     """Recibe mensajes de WhatsApp vía Twilio."""
     mensaje_entrante = request.form.get("Body", "").strip()
     
-    # Carga el inventario usando los filtros mejorados
+    # Carga solo lo necesario
     inventario = cargar_inventario_supabase(mensaje_entrante)
     respuesta_texto = consultar_ia(mensaje_entrante, inventario)
 
@@ -139,7 +91,7 @@ def webhook():
 
 @app.route("/", methods=["GET"])
 def health():
-    return "✅ Botoncín Inteligente e Híbrido corriendo en Render", 200
+    return "✅ Botoncín Híbrido y Económico corriendo en Render", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
