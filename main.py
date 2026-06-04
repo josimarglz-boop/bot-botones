@@ -94,7 +94,7 @@ Instrucciones:
 
     # Usamos el modelo Sonnet que está activo en tu cuenta, pero ultra blindado por los filtros previos
     message = client.messages.create(
-        model="claude-3-5-sonnet-latest",
+        model="claude-haiku-4-5",
         max_tokens=500,
         temperature=0.1,
         messages=[{"role": "user", "content": prompt}]
