@@ -69,7 +69,7 @@ Instrucciones:
 
     # Cambiamos al modelo claude-3-5-haiku para reducir el costo un 90%
     message = client.messages.create(
-       model="claude-haiku-4-5"  # ← en lugar de "claude-sonnet-4-5",
+        model="claude-haiku-4-5",
         max_tokens=500,
         temperature=0.1,
         messages=[{"role": "user", "content": prompt}]
