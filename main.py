@@ -87,7 +87,7 @@ Instrucciones:
 """
 
     message = client.messages.create(
-        model="claude-4-5-haiku",
+        model="claude-haiku-4-5",
         max_tokens=500,
         temperature=0.1,
         messages=[{"role": "user", "content": prompt}]
