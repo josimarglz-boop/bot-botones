@@ -95,7 +95,7 @@ Instrucciones:
     )
     return message.content[0].text
 
-@app.route("/webhook", methods=["POST"])
+@app.route("/webhook", methods=["POST"])  # <-- ¡ESTA ES LA LÍNEA MÁGICA QUE FALTA!
 def webhook():
     """Recibe mensajes de WhatsApp vía Twilio."""
     mensaje_entrante = request.form.get("Body", "").strip()
