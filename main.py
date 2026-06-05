@@ -14,9 +14,9 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def cargar_inventario_supabase(pregunta: str):
-    """Detecta si buscan botones o mercería y apunta a la tabla correcta usando tu lógica actual."""
+    """Detecta si buscan botones o mercería y apunta a las columnas reales de tu Supabase."""
     try:
-        # Extraer palabras clave limpias (Tu código original)
+        # Extraer palabras clave limpias (Tu lógica original)
         palabras = [p.strip().lower() for p in re.findall(r'\b\w+\b', pregunta) if len(p) > 2]
         
         saludos = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa", "dame", "opciones"]
@@ -24,32 +24,31 @@ def cargar_inventario_supabase(pregunta: str):
             return []
 
         # 1. TUS PALABRAS MÁGICAS PARA MERCERÍA
-        # Si el vendedor escribe cualquiera de estas, el bot mirará la hoja de mercería
         palabras_merceria = ["cinta", "palmita", "resorte", "elastico", "elástico", "plastiflecha", "candado"]
         es_consulta_merceria = any(p in palabras_merceria for p in palabras)
         
         resultados = []
         
-        # 2. SI ES MERCERÍA: Busca en la nueva tabla
+        # 2. SI ES MERCERÍA: Apunta a tus columnas reales de Supabase (Modelo y Descripción)
         if es_consulta_merceria:
             for palabra in palabras:
                 if palabra in saludos:
                     continue
-                # Aquí pones las columnas nuevas que hayas decidido para tu hoja de mercería
-                res_prod = supabase.table("inventario_merceria").select("*").ilike("Producto", f"%{palabra}%").limit(5).execute()
-                res_cod = supabase.table("inventario_merceria").select("*").ilike("Código", f"%{palabra}%").limit(5).execute()
                 
-                if res_prod.data:
-                    resultados.extend(res_prod.data)
-                if res_cod.data:
-                    resultados.extend(res_cod.data)
+                # Corregido con los nombres exactos de tu captura de pantalla
+                res_desc = supabase.table("inventario_merceria").select("*").ilike("Descripción", f"%{palabra}%").limit(5).execute()
+                res_mod = supabase.table("inventario_merceria").select("*").ilike("Modelo", f"%{palabra}%").limit(5).execute()
+                
+                if res_desc.data:
+                    resultados.extend(res_desc.data)
+                if res_mod.data:
+                    resultados.extend(res_mod.data)
 
         # 3. SI ES BOTÓN: Tu ruta original de ayer que sí funciona
         else:
             for palabra in palabras:
                 if palabra in saludos:
                     continue
-                # Busca en tu tabla original de botones (sin la columna categoría)
                 res_modelo = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{palabra}%").limit(5).execute()
                 res_uso = supabase.table("inventario_botones").select("*").ilike("Uso", f"%{palabra}%").limit(5).execute()
                 
