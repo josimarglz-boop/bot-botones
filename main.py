@@ -83,8 +83,8 @@ Instrucciones:
 3. LOGICA COMERCIAL: Ordena por tamaño ascendente. Si el cliente pide en "mazos" o "gruesas", aclara amablemente cuántas piezas o unidades te quedan en stock total para que el vendedor haga la conversión. Si el stock es 0, usa la 'fecha_llegada' (ej: 🚚 Próxima llegada: 15 de Junio). Si es menor a 500 piezas, avisa que quedan pocas unidades. 1 mazo = 1728 pzs, 1 gruesa = 144 pzs.
 4. FORMATO DE RESPUESTA INTELIGENTE POR CATEGORÍA:
    - Armas una descripción natural y fluida según el producto.
-   - Si es un BOTÓN: Muestra Código, Modelo, Tamaño, Stock, Fecha de llegada (si aplica) y el Link de la imagen.
-   - Si es OTRO PRODUCTO (Cintas, Resortes, etc.): Genera una descripción general e intuitiva en una sola línea combinando sus datos (ej: "Cinta palmita de 20mm en color crudo"), seguido del Stock disponible, Fecha de llegada (si aplica) y su Link de imagen.
+   - Si es un BOTÓN: Muestra Código, Modelo, Tamaño, Stock, Fecha de llegada y el Link de la imagen.
+   - Si es OTRO PRODUCTO (Cintas, Resortes, etc.): Genera una descripción combinando los datos y muestra el "Stock" disponible usando el valor real de la columna (ej: Stock: 500 rollos), seguido de su Link de imagen.
    - En ningún caso uses asteriscos dobles (**). Usa saltos de línea limpios y emojis para separar la información.
 """
 
