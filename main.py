@@ -19,20 +19,20 @@ def cargar_inventario_supabase(pregunta: str):
         # Extraer palabras clave limpias
         palabras = [p.strip().lower() for p in re.findall(r'\b\w+\b', pregunta) if len(p) > 2]
         
-        saludos = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa", "dame", "opciones", "quisiera", "favor"]
+        saludos = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa", "dame", "opciones", "quisiera", "favor", "tenemos", "colores"]
         
         # Filtrar palabras vacías o saludos
         palabras_filtradas = [p for p in palabras if p not in saludos]
         if not palabras_filtradas:
             return []
 
-        # 1. TUS PALABRAS MÁGICAS PARA MERCERÍA
-        palabras_merceria = ["cinta", "palmita", "resorte", "elastico", "elástico", "plastiflecha", "candado", "fleco", "satinado", "bolsas"]
+        # 1. PALABRAS MÁGICAS PARA MERCERÍA
+        palabras_merceria = ["cinta", "palmita", "resorte", "elastico", "elástico", "plastiflecha", "candado", "fleco", "satinado", "bolsas", "contactel"]
         es_consulta_merceria = any(p in palabras_merceria for p in palabras_filtradas)
         
         resultados = []
         
-        # 2. SI ES MERCERÍA: Busca en Descripción, Modelo y TAGS
+        # 2. RUTA MERCERÍA: Busca estrictamente en su tabla
         if es_consulta_merceria:
             for palabra in palabras_filtradas:
                 res_desc = supabase.table("inventario_merceria").select("*").ilike("Descripción", f"%{palabra}%").limit(3).execute()
@@ -46,7 +46,7 @@ def cargar_inventario_supabase(pregunta: str):
                 if res_tags.data:
                     resultados.extend(res_tags.data)
 
-        # 3. SI ES BOTÓN: Busca en Modelo, Uso y también en tus nuevos TAGS
+        # 3. RUTA BOTONES: Busca estrictamente en su tabla
         else:
             for palabra in palabras_filtradas:
                 res_modelo = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{palabra}%").limit(3).execute()
@@ -60,9 +60,12 @@ def cargar_inventario_supabase(pregunta: str):
                 if res_tags_btn.data:
                     resultados.extend(res_tags_btn.data)
 
-        # Eliminar duplicados usando el ID
-        resultados_unicos = {f['id']: f for f in photos}.values() if 'photos' in locals() else {f['id']: f for f in resultados}.values()
-        return list(resultados_unicos)[:6]
+        # CORREGIDO: Eliminación de duplicados limpia y real sin código fantasma
+        resultados_unicos = {}
+        for fila in resultados:
+            resultados_unicos[fila['id']] = fila
+            
+        return list(resultados_unicos.values())[:6]
 
     except Exception as e:
         print(f"Error filtrando en Supabase: {e}")
