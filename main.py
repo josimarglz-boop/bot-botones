@@ -14,14 +14,14 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def cargar_inventario_supabase(pregunta: str):
-    """Detecta si buscan botones o mercería y apunta a las columnas reales de tu Supabase."""
+    """Detecta si buscan botones o mercería y apunta a las columnas reales de tu Supabase, incluyendo TAGS."""
     try:
         # Extraer palabras clave limpias
         palabras = [p.strip().lower() for p in re.findall(r'\b\w+\b', pregunta) if len(p) > 2]
         
         saludos = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa", "dame", "opciones", "quisiera", "favor"]
         
-        # Filtrar palabras vacías o saludos para no saturar Supabase con búsquedas inútiles
+        # Filtrar palabras vacías o saludos
         palabras_filtradas = [p for p in palabras if p not in saludos]
         if not palabras_filtradas:
             return []
@@ -32,30 +32,36 @@ def cargar_inventario_supabase(pregunta: str):
         
         resultados = []
         
-        # 2. SI ES MERCERÍA: Apunta a tus columnas reales de Supabase (Modelo y Descripción)
+        # 2. SI ES MERCERÍA: Busca en Descripción, Modelo y TAGS
         if es_consulta_merceria:
             for palabra in palabras_filtradas:
                 res_desc = supabase.table("inventario_merceria").select("*").ilike("Descripción", f"%{palabra}%").limit(3).execute()
                 res_mod = supabase.table("inventario_merceria").select("*").ilike("Modelo", f"%{palabra}%").limit(3).execute()
+                res_tags = supabase.table("inventario_merceria").select("*").ilike("TAGS", f"%{palabra}%").limit(3).execute()
                 
                 if res_desc.data:
                     resultados.extend(res_desc.data)
                 if res_mod.data:
                     resultados.extend(res_mod.data)
+                if res_tags.data:
+                    resultados.extend(res_tags.data)
 
-        # 3. SI ES BOTÓN: Tu ruta original
+        # 3. SI ES BOTÓN: Busca en Modelo, Uso y también en tus nuevos TAGS
         else:
             for palabra in palabras_filtradas:
                 res_modelo = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{palabra}%").limit(3).execute()
                 res_uso = supabase.table("inventario_botones").select("*").ilike("Uso", f"%{palabra}%").limit(3).execute()
+                res_tags_btn = supabase.table("inventario_botones").select("*").ilike("TAGS", f"%{palabra}%").limit(3).execute()
                 
                 if res_modelo.data:
                     resultados.extend(res_modelo.data)
                 if res_uso.data:
                     resultados.extend(res_uso.data)
+                if res_tags_btn.data:
+                    resultados.extend(res_tags_btn.data)
 
         # Eliminar duplicados usando el ID
-        resultados_unicos = {f['id']: f for f in resultados}.values()
+        resultados_unicos = {f['id']: f for f in photos}.values() if 'photos' in locals() else {f['id']: f for f in resultados}.values()
         return list(resultados_unicos)[:6]
 
     except Exception as e:
