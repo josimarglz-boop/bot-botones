@@ -16,48 +16,45 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 def cargar_inventario_supabase(pregunta: str):
     """Detecta si buscan botones o mercería y apunta a las columnas reales de tu Supabase."""
     try:
-        # Extraer palabras clave limpias (Tu lógica original)
+        # Extraer palabras clave limpias
         palabras = [p.strip().lower() for p in re.findall(r'\b\w+\b', pregunta) if len(p) > 2]
         
-        saludos = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa", "dame", "opciones"]
-        if not palabras or all(p in saludos for p in palabras):
+        saludos = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa", "dame", "opciones", "quisiera", "favor"]
+        
+        # Filtrar palabras vacías o saludos para no saturar Supabase con búsquedas inútiles
+        palabras_filtradas = [p for p in palabras if p not in saludos]
+        if not palabras_filtradas:
             return []
 
         # 1. TUS PALABRAS MÁGICAS PARA MERCERÍA
-        palabras_merceria = ["cinta", "palmita", "resorte", "elastico", "elástico", "plastiflecha", "candado"]
-        es_consulta_merceria = any(p in palabras_merceria for p in palabras)
+        palabras_merceria = ["cinta", "palmita", "resorte", "elastico", "elástico", "plastiflecha", "candado", "fleco", "satinado", "bolsas"]
+        es_consulta_merceria = any(p in palabras_merceria for p in palabras_filtradas)
         
         resultados = []
         
         # 2. SI ES MERCERÍA: Apunta a tus columnas reales de Supabase (Modelo y Descripción)
         if es_consulta_merceria:
-            for palabra in palabras:
-                if palabra in saludos:
-                    continue
-                
-                # Corregido con los nombres exactos de tu captura de pantalla
-                res_desc = supabase.table("inventario_merceria").select("*").ilike("Descripción", f"%{palabra}%").limit(5).execute()
-                res_mod = supabase.table("inventario_merceria").select("*").ilike("Modelo", f"%{palabra}%").limit(5).execute()
+            for palabra in palabras_filtradas:
+                res_desc = supabase.table("inventario_merceria").select("*").ilike("Descripción", f"%{palabra}%").limit(3).execute()
+                res_mod = supabase.table("inventario_merceria").select("*").ilike("Modelo", f"%{palabra}%").limit(3).execute()
                 
                 if res_desc.data:
                     resultados.extend(res_desc.data)
                 if res_mod.data:
                     resultados.extend(res_mod.data)
 
-        # 3. SI ES BOTÓN: Tu ruta original de ayer que sí funciona
+        # 3. SI ES BOTÓN: Tu ruta original
         else:
-            for palabra in palabras:
-                if palabra in saludos:
-                    continue
-                res_modelo = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{palabra}%").limit(5).execute()
-                res_uso = supabase.table("inventario_botones").select("*").ilike("Uso", f"%{palabra}%").limit(5).execute()
+            for palabra in palabras_filtradas:
+                res_modelo = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{palabra}%").limit(3).execute()
+                res_uso = supabase.table("inventario_botones").select("*").ilike("Uso", f"%{palabra}%").limit(3).execute()
                 
                 if res_modelo.data:
                     resultados.extend(res_modelo.data)
                 if res_uso.data:
                     resultados.extend(res_uso.data)
 
-        # Eliminar duplicados y recortar a un máximo de 6 (Tu código original)
+        # Eliminar duplicados usando el ID
         resultados_unicos = {f['id']: f for f in resultados}.values()
         return list(resultados_unicos)[:6]
 
@@ -66,31 +63,29 @@ def cargar_inventario_supabase(pregunta: str):
         return []
 
 def consultar_ia(pregunta: str, inventario: list) -> str:
-    """Regresa al prompt original y al motor Sonnet de ayer."""
+    """Usa el prompt comercial optimizado y el modelo de Haiku real."""
     inv_str = str(inventario) 
 
     prompt = f"""Eres "Botoncín" 🧵, el asistente virtual de la tienda de insumos textiles. Responde SIEMPRE en español, alegre, muy breve (máximo 5 líneas) y directo al grano.
 
-INVENTARIO DISPONIBLE (SÓLO USA ESTOS DATOS):
+INVENTARIO DISPONIBLE EN BASE DE DATOS (Usa estrictamente estos valores, presta atención a la columna 'Stock'):
 {inv_str}
 
-Pregunta: "{pregunta}"
+Pregunta del cliente: "{pregunta}"
 
-Instrucciones:
-1. SALUDO: Si te saludan, di "¡Hola! Soy Botoncín 🧵" y pregunta qué modelo buscan. Si van directo a una consulta, NO te presentes, ve al grano.
-2. SIN STOCK/RESULTADOS: Si el inventario está vacío o no coincide lo que busca el cliente, indica amablemente que no encontraste stock disponible para esa solicitud exacta.
-# Modifica esta línea dentro del prompt en consultar_ia:
-3. LOGICA COMERCIAL: Ordena por tamaño ascendente. Si el cliente pide en "mazos" o "gruesas", aclara amablemente cuántas piezas o unidades te quedan en stock total para que el vendedor haga la conversión. Si el stock es 0, usa la 'fecha_llegada' (ej: 🚚 Próxima llegada: 15 de Junio). Si es menor a 500 piezas, avisa que quedan pocas unidades. 1 mazo = 1728 pzs, 1 gruesa = 144 pzs.
-4. FORMATO DE RESPUESTA INTELIGENTE POR CATEGORÍA:
-   - Armas una descripción natural y fluida según el producto.
-   - Si es un BOTÓN: Muestra Código, Modelo, Tamaño, Stock, Fecha de llegada y el Link de la imagen.
-   - Si es OTRO PRODUCTO (Cintas, Resortes, etc.): Genera una descripción combinando los datos y muestra el "Stock" disponible usando el valor real de la columna (ej: Stock: 500 rollos), seguido de su Link de imagen.
-   - En ningún caso uses asteriscos dobles (**). Usa saltos de línea limpios y emojis para separar la información.
+Instrucciones obligatorias:
+1. SALUDO: Si te saludan de forma genérica, di "¡Hola! Soy Botoncín 🧵" y pregunta qué buscan. Si van directo a pedir un producto, NO te presentes, ve directo a la información.
+2. DISPONIBILIDAD: Revisa el valor de la columna 'Stock' con mayúscula. Si viene un número mayor a 0, indica que sí hay disponibilidad. Si el inventario está vacío o no encuentras el modelo, di amablemente que no tienes stock.
+3. LOGICA UNIDADES: Si el cliente te pide en unidades como "mazos" o "gruesas", indícales amablemente el Stock total que tienes numérico para que ellos hagan su conversión comercial (1 mazo = 1728 pzs, 1 gruesa = 144 pzs).
+4. FORMATO DE RESPUESTA:
+   - Presenta la información limpia usando saltos de línea y emojis. No uses asteriscos dobles (**).
+   - Muestra siempre el Modelo, la Descripción, el Stock disponible y al final pon el Link de la imagen correspondiente.
 """
 
+    # CORREGIDO: Usando el ID de modelo oficial de Anthropic Claude 3 Haiku
     message = client.messages.create(
         model="claude-haiku-4-5",
-        max_tokens=500,
+        max_tokens=400,
         temperature=0.1,
         messages=[{"role": "user", "content": prompt}]
     )
