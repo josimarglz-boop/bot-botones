@@ -14,53 +14,47 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def cargar_inventario_supabase(pregunta: str):
-    """Detecta si buscan botones o mercería y apunta a las columnas reales de tu Supabase, incluyendo TAGS."""
+    """Detecta si buscan botones o mercería y apunta a las columnas reales de tu Supabase sin saturar por palabras comunes."""
     try:
-        # Extraer palabras clave limpias
+        # Corregido: Permite guiones para capturar sufijos unidos (ej: B5529-4)
         palabras = [p.strip().lower() for p in re.findall(r'\b\w+(?:-\w+)?\b', pregunta) if len(p) > 2]
         
-        saludos = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa", "dame", "opciones", "quisiera", "favor", "tenemos", "colores"]
+        # Ampliamos la lista para ignorar palabras que rompen la búsqueda en Supabase
+        ignorar = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa", "dame", "opciones", "botón", "boton", "botones", "hoyos", "hoyo", "tamaños", "tamaño", "tienes", "que", "para"]
         
-        # Filtrar palabras vacías o saludos
-        palabras_filtradas = [p for p in palabras if p not in saludos]
+        palabras_filtradas = [p for p in palabras if p not in ignorar]
         if not palabras_filtradas:
             return []
 
-        # 1. PALABRAS MÁGICAS PARA MERCERÍA
-        palabras_merceria = ["cinta", "palmita", "resorte", "elastico", "elástico", "plastiflecha", "candado", "fleco", "satinado", "bolsas", "contactel"]
+        # 1. TUS PALABRAS MÁGICAS PARA MERCERÍA
+        palabras_merceria = ["cinta", "palmita", "resorte", "elastico", "elástico", "plastiflecha", "candado", "contactel"]
         es_consulta_merceria = any(p in palabras_merceria for p in palabras_filtradas)
         
         resultados = []
         
-        # 2. RUTA MERCERÍA: Busca estrictamente en su tabla
+        # 2. SI ES MERCERÍA
         if es_consulta_merceria:
             for palabra in palabras_filtradas:
                 res_desc = supabase.table("inventario_merceria").select("*").ilike("Descripción", f"%{palabra}%").limit(3).execute()
                 res_mod = supabase.table("inventario_merceria").select("*").ilike("Modelo", f"%{palabra}%").limit(3).execute()
-                res_tags = supabase.table("inventario_merceria").select("*").ilike("TAGS", f"%{palabra}%").limit(3).execute()
                 
                 if res_desc.data:
                     resultados.extend(res_desc.data)
                 if res_mod.data:
                     resultados.extend(res_mod.data)
-                if res_tags.data:
-                    resultados.extend(res_tags.data)
 
-        # 3. RUTA BOTONES: Busca estrictamente en su tabla
+        # 3. SI ES BOTÓN: Solo buscará por el número de modelo real (ej: 5529)
         else:
             for palabra in palabras_filtradas:
-                res_modelo = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{palabra}%").limit(3).execute()
-                res_uso = supabase.table("inventario_botones").select("*").ilike("Uso", f"%{palabra}%").limit(3).execute()
-                res_tags_btn = supabase.table("inventario_botones").select("*").ilike("TAGS", f"%{palabra}%").limit(3).execute()
+                res_modelo = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{palabra}%").limit(4).execute()
+                res_uso = supabase.table("inventario_botones").select("*").ilike("Uso", f"%{palabra}%").limit(4).execute()
                 
                 if res_modelo.data:
                     resultados.extend(res_modelo.data)
                 if res_uso.data:
                     resultados.extend(res_uso.data)
-                if res_tags_btn.data:
-                    resultados.extend(res_tags_btn.data)
 
-        # CORREGIDO: Eliminación de duplicados limpia y real sin código fantasma
+        # Eliminar duplicados de forma limpia
         resultados_unicos = {}
         for fila in resultados:
             resultados_unicos[fila['id']] = fila
