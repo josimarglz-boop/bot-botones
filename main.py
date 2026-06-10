@@ -1,3 +1,4 @@
+
 import os
 import re
 from flask import Flask, request
@@ -14,47 +15,53 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def cargar_inventario_supabase(pregunta: str):
-    """Detecta si buscan botones o mercería y apunta a las columnas reales de tu Supabase sin saturar por palabras comunes."""
+    """Detecta si buscan botones o mercería y apunta a las columnas reales de tu Supabase, incluyendo TAGS."""
     try:
-        # Corregido: Permite guiones para capturar sufijos unidos (ej: B5529-4)
-        palabras = [p.strip().lower() for p in re.findall(r'\b\w+(?:-\w+)?\b', pregunta) if len(p) > 2]
+        # Extraer palabras clave limpias
+        palabras = [p.strip().lower() for p in re.findall(r'\b\w+\b', pregunta) if len(p) > 2]
         
-        # Ampliamos la lista para ignorar palabras que rompen la búsqueda en Supabase
-        ignorar = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa", "dame", "opciones", "botón", "boton", "botones", "hoyos", "hoyo", "tamaños", "tamaño", "tienes", "que", "para"]
+        saludos = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa", "dame", "opciones", "quisiera", "favor", "tenemos",]
         
-        palabras_filtradas = [p for p in palabras if p not in ignorar]
+        # Filtrar palabras vacías o saludos
+        palabras_filtradas = [p for p in palabras if p not in saludos]
         if not palabras_filtradas:
             return []
 
-        # 1. TUS PALABRAS MÁGICAS PARA MERCERÍA
-        palabras_merceria = ["cinta", "palmita", "resorte", "elastico", "elástico", "plastiflecha", "candado", "contactel"]
+        # 1. PALABRAS MÁGICAS PARA MERCERÍA
+        palabras_merceria = ["cinta", "palmita", "resorte", "elastico", "elástico", "plastiflecha", "candado", "fleco", "satinado", "bolsas", "contactel"]
         es_consulta_merceria = any(p in palabras_merceria for p in palabras_filtradas)
         
         resultados = []
         
-        # 2. SI ES MERCERÍA
+        # 2. RUTA MERCERÍA: Busca estrictamente en su tabla
         if es_consulta_merceria:
             for palabra in palabras_filtradas:
                 res_desc = supabase.table("inventario_merceria").select("*").ilike("Descripción", f"%{palabra}%").limit(3).execute()
                 res_mod = supabase.table("inventario_merceria").select("*").ilike("Modelo", f"%{palabra}%").limit(3).execute()
+                res_tags = supabase.table("inventario_merceria").select("*").ilike("TAGS", f"%{palabra}%").limit(3).execute()
                 
                 if res_desc.data:
                     resultados.extend(res_desc.data)
                 if res_mod.data:
                     resultados.extend(res_mod.data)
+                if res_tags.data:
+                    resultados.extend(res_tags.data)
 
-        # 3. SI ES BOTÓN: Solo buscará por el número de modelo real (ej: 5529)
+        # 3. RUTA BOTONES: Busca estrictamente en su tabla
         else:
             for palabra in palabras_filtradas:
-                res_modelo = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{palabra}%").limit(4).execute()
-                res_uso = supabase.table("inventario_botones").select("*").ilike("Uso", f"%{palabra}%").limit(4).execute()
+                res_modelo = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{palabra}%").limit(3).execute()
+                res_uso = supabase.table("inventario_botones").select("*").ilike("Uso", f"%{palabra}%").limit(3).execute()
+                res_tags_btn = supabase.table("inventario_botones").select("*").ilike("TAGS", f"%{palabra}%").limit(3).execute()
                 
                 if res_modelo.data:
                     resultados.extend(res_modelo.data)
                 if res_uso.data:
                     resultados.extend(res_uso.data)
+                if res_tags_btn.data:
+                    resultados.extend(res_tags_btn.data)
 
-        # Eliminar duplicados de forma limpia
+        # CORREGIDO: Eliminación de duplicados limpia y real sin código fantasma
         resultados_unicos = {}
         for fila in resultados:
             resultados_unicos[fila['id']] = fila
@@ -90,10 +97,10 @@ Instrucciones obligatorias:
    - Sufijo "-L" = Acabado Liso.
    - Sufijo "-B" = Acabado Brillante.
    - Sufijo "-M" = Acabado Mate.
-Si el cliente te pregunta por el botón "5529 de 4 hoyos", busca en el inventario provisto el modelo que termine exactamente en "-4" (B5529-4) y muestra exclusivamente el stock de ese modelo. No los mezcles ni digas que no hay existencias si el registro está en el inventario.   
+Si el cliente te pregunta por el botón "5529 de 4 hoyos", busca en el inventario provisto el modelo que termine exactamente en "-4" (B5529-4) y muestra exclusivamente el stock de ese modelo. No los mezcles ni digas que no hay existencias si el registro está en el inventario.
 """
 
-    # CORREGIDO: Usando el ID de modelo oficial de Anthropic Claude 3 Haiku
+    # 
     message = client.messages.create(
         model="claude-haiku-4-5",
         max_tokens=400,
