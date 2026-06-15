@@ -17,13 +17,30 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 def cargar_inventario_supabase(pregunta: str):
     """Detecta si buscan botones o mercería y apunta a las columnas reales de tu Supabase, incluyendo TAGS."""
     try:
+        pregunta_limpia = pregunta.lower()
+        
+        # --- NUEVA MEJORA DE DETECCIÓN DE HOYOS ---
+        # Si dice "4 hoyos" o "2 hoyos", extraemos la combinación exacta para no buscar "hoyos" a secas
+        patron_hoyos = re.search(r'(\d+)\s*hoyo', pregunta_limpia)
+        termino_hoyos = None
+        if patron_hoyos:
+            termino_hoyos = f"{patron_hoyos.group(1)} hoyos" # Ejemplo: "4 hoyos"
+        
         # Extraer palabras clave limpias
         palabras = [p.strip().lower() for p in re.findall(r'\b\w+\b', pregunta) if len(p) > 2]
         
-        saludos = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa", "dame", "opciones", "quisiera", "favor", "tenemos",]
+        saludos = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa", "dame", "opciones", "quisiera", "favor", "tenemos", "colores"]
         
         # Filtrar palabras vacías o saludos
         palabras_filtradas = [p for p in palabras if p not in saludos]
+        
+        # Si detectamos "4 hoyos", reemplazamos la palabra suelta "hoyos" y el número para que no ensucien la búsqueda
+        if termino_hoyos:
+            # Eliminamos "hoyos", "hoyo" y el número de la lista de palabras sueltas
+            palabras_filtradas = [p for p in palabras_filtradas if p not in ["hoyos", "hoyo", patron_hoyos.group(1)]]
+            # Agregamos el término compuesto exacto "4 hoyos"
+            palabras_filtradas.append(termino_hoyos)
+
         if not palabras_filtradas:
             return []
 
@@ -50,9 +67,9 @@ def cargar_inventario_supabase(pregunta: str):
         # 3. RUTA BOTONES: Busca estrictamente en su tabla
         else:
             for palabra in palabras_filtradas:
-                res_modelo = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{palabra}%").limit(3).execute()
-                res_uso = supabase.table("inventario_botones").select("*").ilike("Uso", f"%{palabra}%").limit(3).execute()
-                res_tags_btn = supabase.table("inventario_botones").select("*").ilike("TAGS", f"%{palabra}%").limit(3).execute()
+                res_modelo = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{palabra}%").limit(4).execute()
+                res_uso = supabase.table("inventario_botones").select("*").ilike("Uso", f"%{palabra}%").limit(4).execute()
+                res_tags_btn = supabase.table("inventario_botones").select("*").ilike("TAGS", f"%{palabra}%").limit(4).execute()
                 
                 if res_modelo.data:
                     resultados.extend(res_modelo.data)
