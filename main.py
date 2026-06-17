@@ -36,7 +36,7 @@ def cargar_inventario_supabase(pregunta: str):
         if patron_color:
             modelo_merceria = patron_color.group(1)
             color_texto = patron_color.group(2)
-            mapa_colores = {"negro": "ne", "blanco": "bl", "rojo": "ro", "azul": "az", "amarillo": "am", "verde": "vd", "rosa": "rs"}
+            mapa_colores = {"negro": "n", "blanco": "b", "rojo": "r", "marino": "m",  "crudo": "cr"}
             codigo_color = mapa_colores.get(color_texto)
             if codigo_color:
                 termino_merceria_compacto = f"{modelo_merceria}{codigo_color}"
