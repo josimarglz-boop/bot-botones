@@ -128,10 +128,10 @@ Instrucciones obligatorias:
 5. DICCIONARIO DE SUFIJOS: Presta extrema atención a la parte final del 'Modelo' (ej: B5529-2 o B5936-R). Interpreta y asocia los sufijos de las claves según esta guía para responder exactamente lo que pide el cliente:
    - Sufijo "-2" = Tiene 2 hoyos.
    - Sufijo "-4" = Tiene 4 hoyos.
-   - Sufijo "-R" = Acabado Rayado.
-   - Sufijo "-L" = Acabado Liso.
-   - Sufijo "-B" = Acabado Brillante.
-   - Sufijo "-M" = Acabado Mate.
+   - Sufijo "R" = Acabado Rayado.
+   - Sufijo "L" = Acabado Liso.
+   - Sufijo "B" = Acabado Brillante.
+   - Sufijo "M" = Acabado Mate.
 Si el cliente te pregunta por el botón "5529 de 4 hoyos", busca en el inventario provisto el modelo que termine exactamente en "-4" (B5529-4) y muestra exclusivamente el stock de ese modelo. No los mezcles ni digas que no hay existencias si el registro está en el inventario.
 """
 
