@@ -1,4 +1,3 @@
-
 import os
 import re
 from flask import Flask, request
@@ -13,6 +12,24 @@ client = Anthropic()
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# --- DICCIONARIOS DE TRADUCCIÓN DE SUFIJOS ---
+SUFIJOS_BOTONES = {
+    'M': 'mate',
+    'B': 'brillante',
+    'L': 'liso',
+    'R': 'rayado',
+    '4': '4 hoyos',
+    '2': '2 hoyos'
+}
+
+SUFIJOS_MERCERIA = {
+    'B': 'Blanco',
+    'N': 'Negro',
+    'M': 'Marino',
+    'CR': 'Crudo'
+}
+
 
 def cargar_inventario_supabase(pregunta: str):
     """Detecta si buscan botones o mercería y apunta a las columnas reales de tu Supabase, incluyendo TAGS."""
@@ -29,95 +46,114 @@ def cargar_inventario_supabase(pregunta: str):
         # Extraer palabras clave limpias
         palabras = [p.strip().lower() for p in re.findall(r'\b\w+\b', pregunta) if len(p) > 2]
         
-        saludos = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa", "dame", "opciones", "quisiera", "favor", "tenemos", "colores"]
+        saludos = ["hola", "buen", "dia", "tarde", "noche", "gracias", "por", "favor"]
+        palabras = [p for p in palabras if p not in saludos]
         
-        # Filtrar palabras vacías o saludos
-        palabras_filtradas = [p for p in palabras if p not in saludos]
+        # --- BÚSQUEDA INTELIGENTE POR SUFIJO (FILTRO DE ENTRADA) ---
+        es_boton = "boton" in pregunta_limpia or "botón" in pregunta_limpia
         
-        # Si detectamos "4 hoyos", reemplazamos la palabra suelta "hoyos" y el número para que no ensucien la búsqueda
-        if termino_hoyos:
-            # Eliminamos "hoyos", "hoyo" y el número de la lista de palabras sueltas
-            palabras_filtradas = [p for p in palabras_filtradas if p not in ["hoyos", "hoyo", patron_hoyos.group(1)]]
-            # Agregamos el término compuesto exacto "4 hoyos"
-            palabras_filtradas.append(termino_hoyos)
-
-        if not palabras_filtradas:
-            return []
-
-        # 1. PALABRAS MÁGICAS PARA MERCERÍA
-        palabras_merceria = ["cinta", "palmita", "resorte", "elastico", "elástico", "plastiflecha", "candado", "fleco", "satinado", "bolsas", "contactel"]
-        es_consulta_merceria = any(p in palabras_merceria for p in palabras_filtradas)
-        
-        resultados = []
-        
-        # 2. RUTA MERCERÍA: Busca estrictamente en su tabla
-        if es_consulta_merceria:
-            for palabra in palabras_filtradas:
-                res_desc = supabase.table("inventario_merceria").select("*").ilike("Descripción", f"%{palabra}%").limit(3).execute()
-                res_mod = supabase.table("inventario_merceria").select("*").ilike("Modelo", f"%{palabra}%").limit(3).execute()
-                res_tags = supabase.table("inventario_merceria").select("*").ilike("TAGS", f"%{palabra}%").limit(3).execute()
-                
-                if res_desc.data:
-                    resultados.extend(res_desc.data)
-                if res_mod.data:
-                    resultados.extend(res_mod.data)
-                if res_tags.data:
-                    resultados.extend(res_tags.data)
-
-        # 3. RUTA BOTONES: Busca estrictamente en su tabla
+        if es_boton:
+            if "mate" in pregunta_limpia:
+                palabras.append("m")
+            elif "brillante" in pregunta_limpia:
+                palabras.append("b")
+            elif "liso" in pregunta_limpia:
+                palabras.append("l")
+            elif "rayado" in pregunta_limpia:
+                palabras.append("r")
         else:
-            for palabra in palabras_filtradas:
-                res_modelo = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{palabra}%").limit(4).execute()
-                res_uso = supabase.table("inventario_botones").select("*").ilike("Uso", f"%{palabra}%").limit(4).execute()
-                res_tags_btn = supabase.table("inventario_botones").select("*").ilike("TAGS", f"%{palabra}%").limit(4).execute()
-                
-                if res_modelo.data:
-                    resultados.extend(res_modelo.data)
-                if res_uso.data:
-                    resultados.extend(res_uso.data)
-                if res_tags_btn.data:
-                    resultados.extend(res_tags_btn.data)
+            if "blanco" in pregunta_limpia:
+                palabras.append("b")
+            elif "negro" in pregunta_limpia:
+                palabras.append("n")
+            elif "marino" in pregunta_limpia:
+                palabras.append("m")
+            elif "crudo" in pregunta_limpia:
+                palabras.append("cr")
 
-        # CORREGIDO: Eliminación de duplicados limpia y real sin código fantasma
-        resultados_unicos = {}
-        for fila in resultados:
-            resultados_unicos[fila['id']] = fila
+        # Determinar tabla destino
+        if es_boton or "broche" in pregunta_limpia:
+            tabla_destino = "inventario_botones"
+        else:
+            tabla_destino = "inventario_merceria"
             
-        return list(resultados_unicos.values())[:6]
+        query = supabase.table(tabla_destino).select("*")
+        
+        if termino_hoyos:
+            query = query.ilike('Descripción', f'%{termino_hoyos}%')
+            
+        # Si no hay "X hoyos", buscar por palabras clave comunes o tags
+        elif palabras:
+            condiciones_or = []
+            for p in palabras:
+                condiciones_or.append(f"Modelo.ilike.%{p}%")
+                condiciones_or.append(f"Descripción.ilike.%{p}%")
+                condiciones_or.append(f"tags.ilike.%{p}%")
+            
+            query = query.or_(",".join(condiciones_or))
+            
+        respuesta = query.limit(15).execute()
+        data = respuesta.data
+        
+        if not data:
+            return "No encontré productos específicos para esa solicitud en el inventario actual."
+            
+        texto_inventario = f"Resultados encontrados en [{tabla_destino}]:\n"
+        for item in data:
+            # --- NUEVO BLOQUE TRADUCTOR DE SUFIJOS (FILTRO DE SALIDA) ---
+            modelo = item.get('Modelo', '')
+            descripcion = item.get('Descripción', 'N/A')
+            sufijo = modelo[-1].upper() if modelo else ''
+            
+            detalles_sufijo = []
+            if "boton" in tabla_destino:
+                if sufijo in SUFIJOS_BOTONES:
+                    detalles_sufijo.append(f"Acabado/Variante: {SUFIJOS_BOTONES[sufijo]}")
+            else:
+                # Mercería: revisa si viene con guion (FLECO05-N) o directo al final
+                letra_color = modelo.split('-')[-1].upper() if '-' in modelo else sufijo
+                if letra_color in SUFIJOS_MERCERIA:
+                    detalles_sufijo.append(f"Color: {SUFIJOS_MERCERIA[letra_color]}")
+            
+            if detalles_sufijo:
+                descripcion = f"{descripcion} ({' | '.join(detalles_sufijo)})"
 
+            texto_inventario += (
+                f"- Modelo: {modelo}, Descripción: {descripcion}, "
+                f"Stock: {item.get('Stock Físico M', item.get('Stock Real', 0))}, "
+                f"Fecha Llegada: {item.get('fecha_llegada', 'N/A')}\n"
+            )
+            
+        return texto_inventario
+        
     except Exception as e:
-        print(f"Error filtrando en Supabase: {e}")
-        return []
+        return f"Error consultando la base de datos: {str(e)}"
 
-def consultar_ia(pregunta: str, inventario: list) -> str:
-    """Usa el prompt comercial optimizado y el modelo de Haiku real."""
-    inv_str = str(inventario) 
 
-    prompt = f"""Eres "Botoncín" 🧵, el asistente virtual de la tienda de insumos textiles. Responde SIEMPRE en español, alegre, breve (máximo 7 líneas) y directo al grano.
-    
-INVENTARIO DISPONIBLE EN BASE DE DATOS (Usa estrictamente estos valores, presta atención a la columna 'Stock'):
-{inv_str}
+def consultar_ia(pregunta, inventario):
+    """Envía la pregunta y el inventario real a Claude estructurando las instrucciones del sistema."""
+    prompt = f"""
+Tu nombre es "Bot Botones", un asistente virtual experto en atención al cliente para una tienda de botones y mercería. Tu objetivo es responder las dudas de stock del cliente basándote ÚNICAMENTE en el inventario real extraído de la base de datos que se te proporciona abajo.
 
-Pregunta del cliente: "{pregunta}"
+REGLAS DE ORO DE COMPORTAMIENTO:
+1. **Veracidad Absoluta**: Responde basándote solo en los datos provistos en la sección "INVENTARIO DISPONIBLE". Si un producto no aparece o su stock es 0, indica amablemente que no hay disponibilidad o sugiere una variante que SÍ esté en la lista. Jamás inventes existencias.
+2. **Formato de Unidades**: 
+   - En la tabla de botones, las cantidades reflejan unidades sueltas. Sé claro (ej: "Tenemos 50 unidades disponibles").
+   - En la tabla de mercería, el stock representa metros (ej: "Tenemos 1400 metros disponibles").
+3. **Análisis de Claves y Sufijos**: Los códigos de los productos contienen sufijos que indican sus variantes. El inventario provisto ya incluye la traducción automática de estas características en la descripción de cada fila (ej: 'Color: Negro' o 'Acabado/Variante: mate'). Confía estrictamente en las descripciones enriquecidas y responde al cliente basándote en el modelo exacto que cumple con lo que pide.
+4. **Fechas de Llegada**: Si el producto deseado no tiene stock inmediato pero tiene una "Fecha Llegada" asignada en el inventario, infórmale al cliente cuándo recibiremos más mercancía para que pueda apartarla.
+5. **Tono y Brevedad**: Mantén una comunicación profesional, sumamente clara
 
-Instrucciones obligatorias:
-1. SALUDO: Si te saludan de forma genérica, di "¡Hola! Soy Botoncín 🧵" y pregunta qué buscan. Si van directo a pedir un producto, NO te presentes, ve directo a la información.
-2. DISPONIBILIDAD: Revisa el valor de la columna 'Stock' con mayúscula. Si viene un número mayor a 0, indica que sí hay disponibilidad. Si el inventario está vacío o no encuentras el modelo, di amablemente que no tienes stock.
-3. LOGICA UNIDADES: Si el cliente te pide una cantidad en "mazos" (1 mazo = 1728 pzs) o "gruesas" (1 gruesa = 144 pzs), calcula mentalmente si el 'Stock' disponible cubre lo que pide. En tu respuesta confirma alegremente si completas los mazos/gruesas solicitados o cuántos le puedes ofrecer según las piezas totales en stock.
-4. FORMATO DE RESPUESTA:
-   - Presenta la información limpia usando saltos de línea y emojis. No uses asteriscos dobles (**).
-   - Muestra siempre el Modelo, la Descripción, el Stock disponible y al final pon el Link de la imagen correspondiente.
-5. DICCIONARIO DE SUFIJOS: Presta extrema atención a la parte final del 'Modelo' (ej: B5529-2 o B5936-R). Interpreta y asocia los sufijos de las claves según esta guía para responder exactamente lo que pide el cliente:
-   - Sufijo "-2" = Tiene 2 hoyos.
-   - Sufijo "-4" = Tiene 4 hoyos.
-   - Sufijo "-R" = Acabado Rayado.
-   - Sufijo "-L" = Acabado Liso.
-   - Sufijo "-B" = Acabado Brillante.
-   - Sufijo "-M" = Acabado Mate.
-Si el cliente te pregunta por el botón "5529 de 4 hoyos", busca en el inventario provisto el modelo que termine exactamente en "-4" (B5529-4) y muestra exclusivamente el stock de ese modelo. No los mezcles ni digas que no hay existencias si el registro está en el inventario.
+---
+INVENTARIO DISPONIBLE EN BASE DE DATOS:
+{inventario}
+---
+
+Pregunta del Cliente: "{pregunta}"
+
+Respuesta del Bot:
 """
 
-    # 
     message = client.messages.create(
         model="claude-haiku-4-5",
         max_tokens=400,
@@ -125,6 +161,7 @@ Si el cliente te pregunta por el botón "5529 de 4 hoyos", busca en el inventari
         messages=[{"role": "user", "content": prompt}]
     )
     return message.content[0].text
+
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -138,10 +175,6 @@ def webhook():
     resp.message(respuesta_texto)
     return str(resp)
 
-@app.route("/", methods=["GET"])
-def health():
-    return "✅ Botoncín Original y Estable corriendo en Render", 200
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=5000)
