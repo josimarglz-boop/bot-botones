@@ -79,9 +79,11 @@ def cargar_inventario_supabase(pregunta: str):
                     resultados.extend(res_tags_btn.data)
 
         # CORREGIDO: Eliminación de duplicados limpia y real sin código fantasma
-        resultados_unicos = {}
-        for fila in resultados:
-            resultados_unicos[fila['id']] = fila
+    resultados_unicos = {}
+    for fila in resultados:
+    # Busca 'id' en minúsculas, si no lo encuentra busca 'ID', y si no, usa el propio objeto como clave
+    clave = fila.get('id', fila.get('ID', str(fila)))
+    resultados_unicos[clave] = fila
             
         return list(resultados_unicos.values())[:6]
 
@@ -124,7 +126,12 @@ Si el cliente te pregunta por el botón "5529 de 4 hoyos", busca en el inventari
         temperature=0.1,
         messages=[{"role": "user", "content": prompt}]
     )
-    return message.content[0].text
+    
+    # Validación segura del contenido
+    if message.content and hasattr(message.content[0], 'text'):
+        return message.content[0].text
+    
+    return "Lo siento, tuve un pequeño problema al procesar la información. ¿Podrías repetir tu pregunta? 🧵"
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
