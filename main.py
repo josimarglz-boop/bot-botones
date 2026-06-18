@@ -15,59 +15,31 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def cargar_inventario_supabase(pregunta: str):
-    """Detecta si buscan botones o mercería y apunta a las columnas reales."""
+    """Detecta si buscan botones o mercería y apunta a las columnas reales de tu Supabase, incluyendo TAGS."""
     try:
         pregunta_limpia = pregunta.lower()
         
-        # 1️⃣ [AQUÍ VA TU LÓGICA DE BOTONES QUE AGREGAMOS ANTES]
-        patron_sufijo = re.search(r'(\d+)\s*(mate|rayado|liso|brillante|brillo)', pregunta_limpia)
-        termino_sufijo_compacto = None
-        if patron_sufijo:
-            numero_modelo = patron_sufijo.group(1)
-            palabra_descriptiva = patron_sufijo.group(2)
-            mapa_sufijos = {"mate": "m", "rayado": "r", "liso": "l", "brillante": "b", "brillo": "b"}
-            sufijo_letra = mapa_sufijos.get(palabra_descriptiva)
-            if sufijo_letra:
-                termino_sufijo_compacto = f"{numero_modelo}{sufijo_letra}"
-
-        # 2️⃣ ⭐ ¡AQUÍ AGREGASTE LA NUEVA LÍNEA DE COLORES! ⭐
-        patron_color = re.search(r'(\d+)\s*(negro|blanco|rojo|azul|amarillo|verde|rosa)', pregunta_limpia)
-        termino_merceria_compacto = None
-        if patron_color:
-            modelo_merceria = patron_color.group(1)
-            color_texto = patron_color.group(2)
-            mapa_colores = {"negro": "n", "blanco": "b", "rojo": "r", "marino": "m",  "crudo": "cr"}
-            codigo_color = mapa_colores.get(color_texto)
-            if codigo_color:
-                termino_merceria_compacto = f"{modelo_merceria}{codigo_color}"
-
-        # 3️⃣ [LÓGICA DE HOYOS QUE YA TENÍAS]
+        # --- NUEVA MEJORA DE DETECCIÓN DE HOYOS ---
+        # Si dice "4 hoyos" o "2 hoyos", extraemos la combinación exacta para no buscar "hoyos" a secas
         patron_hoyos = re.search(r'(\d+)\s*hoyo', pregunta_limpia)
         termino_hoyos = None
         if patron_hoyos:
-            termino_hoyos = f"{patron_hoyos.group(1)} hoyos"
+            termino_hoyos = f"{patron_hoyos.group(1)} hoyos" # Ejemplo: "4 hoyos"
         
-        # 4️⃣ [EXTRACCIÓN Y LIMPIEZA DE PALABRAS]
+        # Extraer palabras clave limpias
         palabras = [p.strip().lower() for p in re.findall(r'\b\w+\b', pregunta) if len(p) > 2]
+        
         saludos = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa", "dame", "opciones", "quisiera", "favor", "tenemos", "colores"]
+        
+        # Filtrar palabras vacías o saludos
         palabras_filtradas = [p for p in palabras if p not in saludos]
         
-        # [LIMPIEZA DE HOYOS]
+        # Si detectamos "4 hoyos", reemplazamos la palabra suelta "hoyos" y el número para que no ensucien la búsqueda
         if termino_hoyos:
+            # Eliminamos "hoyos", "hoyo" y el número de la lista de palabras sueltas
             palabras_filtradas = [p for p in palabras_filtradas if p not in ["hoyos", "hoyo", patron_hoyos.group(1)]]
+            # Agregamos el término compuesto exacto "4 hoyos"
             palabras_filtradas.append(termino_hoyos)
-            
-        # [LIMPIEZA DE SUFIJOS DE BOTONES]
-        if termino_sufijo_compacto:
-            palabras_filtradas = [p for p in palabras_filtradas if p not in [numero_modelo, palabra_descriptiva]]
-            palabras_filtradas.append(termino_sufijo_compacto)
-
-        # 5️⃣ ⭐ REINJECTAMOS EL TÉRMINO DE MERCERÍA COMPACTO ⭐
-        if termino_merceria_compacto:
-            # Eliminamos el número suelto y el color en texto para que no estorben
-            palabras_filtradas = [p for p in palabras_filtradas if p not in [modelo_merceria, color_texto]]
-            # Agregamos el tag armado (ej: "20ne")
-            palabras_filtradas.append(termino_merceria_compacto)
 
         if not palabras_filtradas:
             return []
@@ -78,25 +50,35 @@ def cargar_inventario_supabase(pregunta: str):
         
         resultados = []
         
-        # 2. RUTA MERCERÍA
+        # 2. RUTA MERCERÍA: Busca estrictamente en su tabla
         if es_consulta_merceria:
             for palabra in palabras_filtradas:
-                res = supabase.table("inventario_merceria").select("*").or_(
-                    f"Descripción.ilike.%{palabra}%,Modelo.ilike.%{palabra}%,TAGS.ilike.%{palabra}%"
-                ).limit(3).execute()
-                if res.data:
-                    resultados.extend(res.data)
+                res_desc = supabase.table("inventario_merceria").select("*").ilike("Descripción", f"%{palabra}%").limit(3).execute()
+                res_mod = supabase.table("inventario_merceria").select("*").ilike("Modelo", f"%{palabra}%").limit(3).execute()
+                res_tags = supabase.table("inventario_merceria").select("*").ilike("TAGS", f"%{palabra}%").limit(3).execute()
+                
+                if res_desc.data:
+                    resultados.extend(res_desc.data)
+                if res_mod.data:
+                    resultados.extend(res_mod.data)
+                if res_tags.data:
+                    resultados.extend(res_tags.data)
 
-        # 3. RUTA BOTONES (Aquí buscará "5571m" directamente en el .or_ que lee tus TAGS)
+        # 3. RUTA BOTONES: Busca estrictamente en su tabla
         else:
             for palabra in palabras_filtradas:
-                res = supabase.table("inventario_botones").select("*").or_(
-                    f"Modelo.ilike.%{palabra}%,Uso.ilike.%{palabra}%,TAGS.ilike.%{palabra}%"
-                ).limit(4).execute()
-                if res.data:
-                    resultados.extend(res.data)
+                res_modelo = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{palabra}%").limit(4).execute()
+                res_uso = supabase.table("inventario_botones").select("*").ilike("Uso", f"%{palabra}%").limit(4).execute()
+                res_tags_btn = supabase.table("inventario_botones").select("*").ilike("TAGS", f"%{palabra}%").limit(4).execute()
+                
+                if res_modelo.data:
+                    resultados.extend(res_modelo.data)
+                if res_uso.data:
+                    resultados.extend(res_uso.data)
+                if res_tags_btn.data:
+                    resultados.extend(res_tags_btn.data)
 
-        # Eliminación de duplicados
+        # CORREGIDO: Eliminación de duplicados limpia y real sin código fantasma
         resultados_unicos = {}
         for fila in resultados:
             resultados_unicos[fila['id']] = fila
@@ -128,10 +110,10 @@ Instrucciones obligatorias:
 5. DICCIONARIO DE SUFIJOS: Presta extrema atención a la parte final del 'Modelo' (ej: B5529-2 o B5936-R). Interpreta y asocia los sufijos de las claves según esta guía para responder exactamente lo que pide el cliente:
    - Sufijo "-2" = Tiene 2 hoyos.
    - Sufijo "-4" = Tiene 4 hoyos.
-   - Sufijo "R" = Acabado Rayado.
-   - Sufijo "L" = Acabado Liso.
-   - Sufijo "B" = Acabado Brillante.
-   - Sufijo "M" = Acabado Mate.
+   - Sufijo "-R" = Acabado Rayado.
+   - Sufijo "-L" = Acabado Liso.
+   - Sufijo "-B" = Acabado Brillante.
+   - Sufijo "-M" = Acabado Mate.
 Si el cliente te pregunta por el botón "5529 de 4 hoyos", busca en el inventario provisto el modelo que termine exactamente en "-4" (B5529-4) y muestra exclusivamente el stock de ese modelo. No los mezcles ni digas que no hay existencias si el registro está en el inventario.
 """
 
