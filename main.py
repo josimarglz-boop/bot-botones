@@ -9,129 +9,160 @@ from supabase import create_client, Client
 app = Flask(__name__)
 client = Anthropic()
 
-# Conexión automática con tus variables de Render
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def cargar_inventario_supabase(pregunta: str):
-    """Detecta si buscan botones o mercería y apunta a las columnas reales de tu Supabase, incluyendo TAGS."""
+    """Búsqueda precisa: detecta sufijos (B5568-B vs B5568-M), tablas, tamaños."""
     try:
-        pregunta_limpia = pregunta.lower()
+        pregunta_lower = pregunta.lower()
         
-        # --- NUEVA MEJORA DE DETECCIÓN DE HOYOS ---
-        # Si dice "4 hoyos" o "2 hoyos", extraemos la combinación exacta para no buscar "hoyos" a secas
-        patron_hoyos = re.search(r'(\d+)\s*hoyo', pregunta_limpia)
-        termino_hoyos = None
-        if patron_hoyos:
-            termino_hoyos = f"{patron_hoyos.group(1)} hoyos" # Ejemplo: "4 hoyos"
+        # Saludos que no generan búsqueda
+        saludos = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa", "dame", "quisiera", "favor"]
+        palabras = [p.strip().lower() for p in re.findall(r'\b\w+\b', pregunta) if len(p) > 2 and p not in saludos]
         
-        # Extraer palabras clave limpias
-        palabras = [p.strip().lower() for p in re.findall(r'\b\w+\b', pregunta) if len(p) > 2]
-        
-        saludos = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa", "dame", "opciones", "quisiera", "favor", "tenemos", "colores"]
-        
-        # Filtrar palabras vacías o saludos
-        palabras_filtradas = [p for p in palabras if p not in saludos]
-        
-        # Si detectamos "4 hoyos", reemplazamos la palabra suelta "hoyos" y el número para que no ensucien la búsqueda
-        if termino_hoyos:
-            # Eliminamos "hoyos", "hoyo" y el número de la lista de palabras sueltas
-            palabras_filtradas = [p for p in palabras_filtradas if p not in ["hoyos", "hoyo", patron_hoyos.group(1)]]
-            # Agregamos el término compuesto exacto "4 hoyos"
-            palabras_filtradas.append(termino_hoyos)
-
-        if not palabras_filtradas:
+        if not palabras:
             return []
 
-        # 1. PALABRAS MÁGICAS PARA MERCERÍA
-        palabras_merceria = ["cinta", "palmita", "resorte", "elastico", "elástico", "plastiflecha", "candado", "fleco", "satinado", "bolsas", "contactel"]
-        es_consulta_merceria = any(p in palabras_merceria for p in palabras_filtradas)
-        
         resultados = []
         
-        # 2. RUTA MERCERÍA: Busca estrictamente en su tabla
-        if es_consulta_merceria:
-            for palabra in palabras_filtradas:
-                res_desc = supabase.table("inventario_merceria").select("*").ilike("Descripción", f"%{palabra}%").limit(3).execute()
-                res_mod = supabase.table("inventario_merceria").select("*").ilike("Modelo", f"%{palabra}%").limit(3).execute()
-                res_tags = supabase.table("inventario_merceria").select("*").ilike("TAGS", f"%{palabra}%").limit(3).execute()
-                
-                if res_desc.data:
-                    resultados.extend(res_desc.data)
-                if res_mod.data:
-                    resultados.extend(res_mod.data)
-                if res_tags.data:
-                    resultados.extend(res_tags.data)
-
-        # 3. RUTA BOTONES: Busca estrictamente en su tabla
-        else:
-            for palabra in palabras_filtradas:
-                res_modelo = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{palabra}%").limit(4).execute()
-                res_uso = supabase.table("inventario_botones").select("*").ilike("Uso", f"%{palabra}%").limit(4).execute()
-                res_tags_btn = supabase.table("inventario_botones").select("*").ilike("TAGS", f"%{palabra}%").limit(4).execute()
-                
-                if res_modelo.data:
-                    resultados.extend(res_modelo.data)
-                if res_uso.data:
-                    resultados.extend(res_uso.data)
-                if res_tags_btn.data:
-                    resultados.extend(res_tags_btn.data)
-
-        # CORREGIDO: Eliminación de duplicados limpia y real sin código fantasma
-    resultados_unicos = {}
-    for fila in resultados:
-    # Busca 'id' en minúsculas, si no lo encuentra busca 'ID', y si no, usa el propio objeto como clave
-    clave = fila.get('id', fila.get('ID', str(fila)))
-    resultados_unicos[clave] = fila
+        # =============== 1. BÚSQUEDA EXACTA POR CÓDIGO CON SUFIJO ===============
+        # Busca: B5568-B, B5568-M, B0003, etc.
+        codigo_match = re.search(r'\b[B]\d{3,4}[-]?[A-Z]?\b', pregunta, re.IGNORECASE)
+        if codigo_match:
+            codigo = codigo_match.group().upper()
             
+            try:
+                # Primero: búsqueda exacta
+                res = supabase.table("inventario_botones").select("*").eq("Modelo", codigo).limit(6).execute()
+                if res.data:
+                    return res.data
+                
+                # Segunda opción: búsqueda sin guión
+                codigo_sin_guion = codigo.replace("-", "")
+                res = supabase.table("inventario_botones").select("*").eq("Modelo", codigo_sin_guion).limit(6).execute()
+                if res.data:
+                    return res.data
+                
+                # Tercera opción: búsqueda fuzzy por prefijo
+                codigo_prefijo = codigo.rstrip("-ABMR")  # Elimina sufijo
+                res = supabase.table("inventario_botones").select("*").ilike("Modelo", f"{codigo_prefijo}%").limit(6).execute()
+                if res.data:
+                    return res.data
+            except Exception as e:
+                print(f"Error búsqueda por código: {e}")
+
+        # =============== 2. DETECTA MERCERÍA vs BOTONES ===============
+        palabras_merceria = ["cinta", "palmita", "resorte", "elastico", "elástico", "plastiflecha", "candado", "fleco", "satinado", "bolsas", "contactel", "crochet", "hilo", "botones"]
+        es_merceria = any(p in palabras_merceria for p in palabras)
+        
+        tabla = "inventario_merceria" if es_merceria else "inventario_botones"
+        columnas_busqueda = ["Descripción", "Modelo", "TAGS"] if es_merceria else ["Modelo", "Uso", "TAGS"]
+        
+        # =============== 3. BÚSQUEDA POR CRITERIOS ESPECÍFICOS ===============
+        for palabra in palabras[:3]:  # Máximo 3 palabras
+            for columna in columnas_busqueda:
+                try:
+                    res = supabase.table(tabla).select("*").ilike(columna, f"%{palabra}%").limit(4).execute()
+                    if res.data:
+                        resultados.extend(res.data)
+                except:
+                    pass
+
+        # =============== 4. BÚSQUEDA POR TAMAÑO (si mencionan talla/ancho/mm) ===============
+        tamaño_match = re.search(r'(?:talla|tamaño|ancho|mm|línea|linea)\s*(\d+)', pregunta)
+        if tamaño_match and tabla == "inventario_botones":
+            tamaño = int(tamaño_match.group(1))
+            try:
+                # Para botones: filtra por Tamaño
+                res = supabase.table(tabla).select("*").eq("Tamaño", tamaño).limit(6).execute()
+                if res.data:
+                    resultados.extend(res.data)
+            except:
+                pass
+        elif tamaño_match and tabla == "inventario_merceria":
+            tamaño = tamaño_match.group(1)
+            try:
+                # Para mercería: busca número en Descripción
+                res = supabase.table(tabla).select("*").ilike("Descripción", f"%{tamaño}%").limit(6).execute()
+                if res.data:
+                    resultados.extend(res.data)
+            except:
+                pass
+
+        # =============== 5. BÚSQUEDA POR HOYOS/ACABADO (solo botones) ===============
+        if tabla == "inventario_botones":
+            if "2 hoyo" in pregunta_lower or "dos hoyo" in pregunta_lower:
+                try:
+                    res = supabase.table(tabla).select("*").eq("Hoyos", "2 hoyos").limit(4).execute()
+                    if res.data:
+                        resultados.extend(res.data)
+                except:
+                    pass
+            elif "4 hoyo" in pregunta_lower or "cuatro hoyo" in pregunta_lower:
+                try:
+                    res = supabase.table(tabla).select("*").eq("Hoyos", "4 hoyos").limit(4).execute()
+                    if res.data:
+                        resultados.extend(res.data)
+                except:
+                    pass
+            
+            # Acabado: Brillante, Mate
+            if "mate" in pregunta_lower:
+                try:
+                    res = supabase.table(tabla).select("*").eq("Acabado", "Mate").limit(4).execute()
+                    if res.data:
+                        resultados.extend(res.data)
+                except:
+                    pass
+            elif "brillante" in pregunta_lower:
+                try:
+                    res = supabase.table(tabla).select("*").eq("Acabado", "Brillante").limit(4).execute()
+                    if res.data:
+                        resultados.extend(res.data)
+                except:
+                    pass
+
+        # =============== 6. ELIMINAR DUPLICADOS Y RETORNAR ===============
+        resultados_unicos = {}
+        for fila in resultados:
+            resultados_unicos[fila['id']] = fila
+        
         return list(resultados_unicos.values())[:6]
 
     except Exception as e:
         print(f"Error filtrando en Supabase: {e}")
         return []
 
-def consultar_ia(pregunta: str, inventario: list) -> str:
-    """Usa el prompt comercial optimizado y el modelo de Haiku real."""
-    inv_str = str(inventario) 
 
-    prompt = f"""Eres "Botoncín" 🧵, el asistente virtual de la tienda de insumos textiles. Responde SIEMPRE en español, alegre, breve (máximo 7 líneas) y directo al grano.
-    
-INVENTARIO DISPONIBLE EN BASE DE DATOS (Usa estrictamente estos valores, presta atención a la columna 'Stock'):
+def consultar_ia(pregunta: str, inventario: list) -> str:
+    """Prompt optimizado para Haiku: breve pero completo."""
+    inv_str = str(inventario)
+
+    prompt = f"""Eres "Botoncín" 🧵, asistente de insumos textiles. Responde en español, breve (máx 6 líneas), alegre, sin asteriscos dobles.
+
+INVENTARIO (usa solo estos datos):
 {inv_str}
 
-Pregunta del cliente: "{pregunta}"
+Pregunta: "{pregunta}"
 
-Instrucciones obligatorias:
-1. SALUDO: Si te saludan de forma genérica, di "¡Hola! Soy Botoncín 🧵" y pregunta qué buscan. Si van directo a pedir un producto, NO te presentes, ve directo a la información.
-2. DISPONIBILIDAD: Revisa el valor de la columna 'Stock' con mayúscula. Si viene un número mayor a 0, indica que sí hay disponibilidad. Si el inventario está vacío o no encuentras el modelo, di amablemente que no tienes stock.
-3. LOGICA UNIDADES: Si el cliente te pide una cantidad en "mazos" (1 mazo = 1728 pzs) o "gruesas" (1 gruesa = 144 pzs), calcula mentalmente si el 'Stock' disponible cubre lo que pide. En tu respuesta confirma alegremente si completas los mazos/gruesas solicitados o cuántos le puedes ofrecer según las piezas totales en stock.
-4. FORMATO DE RESPUESTA:
-   - Presenta la información limpia usando saltos de línea y emojis. No uses asteriscos dobles (**).
-   - Muestra siempre el Modelo, la Descripción, el Stock disponible y al final pon el Link de la imagen correspondiente.
-5. DICCIONARIO DE SUFIJOS: Presta extrema atención a la parte final del 'Modelo' (ej: B5529-2 o B5936-R). Interpreta y asocia los sufijos de las claves según esta guía para responder exactamente lo que pide el cliente:
-   - Sufijo "-2" = Tiene 2 hoyos.
-   - Sufijo "-4" = Tiene 4 hoyos.
-   - Sufijo "-R" = Acabado Rayado.
-   - Sufijo "-L" = Acabado Liso.
-   - Sufijo "-B" = Acabado Brillante.
-   - Sufijo "-M" = Acabado Mate.
-Si el cliente te pregunta por el botón "5529 de 4 hoyos", busca en el inventario provisto el modelo que termine exactamente en "-4" (B5529-4) y muestra exclusivamente el stock de ese modelo. No los mezcles ni digas que no hay existencias si el registro está en el inventario.
+Instrucciones:
+1. Saludo: Si saludan genérico → "¡Hola! Soy Botoncín 🧵 ¿Qué buscas?". Si piden producto → directo.
+2. Stock: Revisa la columna 'Stock'. Si >0 → disponible. Si 0 → "No hay stock". Si vacío → "No encontré ese modelo".
+3. Unidades: Si piden mazos (1 mazo=1728 pzs) o gruesas (1 gruesa=144 pzs), calcula si hay suficiente. Ej: "Pides 2 mazos = 3456 pzs, tengo 5000 ✓".
+4. Formato: Modelo • Tamaño • Hoyos/Acabado • Stock • Fecha llegada (si existe) • Link imagen. Usa emojis, saltos línea.
+5. TAGS: Si incluyen "Teñible", "Básico", "Mate", menciona eso en respuesta.
 """
 
-    # 
     message = client.messages.create(
         model="claude-haiku-4-5",
-        max_tokens=400,
+        max_tokens=350,  # Reducido de 500 para ahorrar
         temperature=0.1,
         messages=[{"role": "user", "content": prompt}]
     )
-    
-    # Validación segura del contenido
-    if message.content and hasattr(message.content[0], 'text'):
-        return message.content[0].text
-    
-    return "Lo siento, tuve un pequeño problema al procesar la información. ¿Podrías repetir tu pregunta? 🧵"
+    return message.content[0].text
+
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -145,9 +176,11 @@ def webhook():
     resp.message(respuesta_texto)
     return str(resp)
 
+
 @app.route("/", methods=["GET"])
 def health():
-    return "✅ Botoncín Original y Estable corriendo en Render", 200
+    return "✅ Botoncín Optimizado v2 en Render", 200
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
