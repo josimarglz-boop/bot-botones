@@ -116,13 +116,16 @@ def cargar_inventario_supabase(pregunta: str):
             "crudo": ("Crudo", "TAGS"),
         }
         
+       # =============== 2. BÚSQUEDA POR PALABRA DESCRIPTIVA + CÓDIGO ===============
         codigo_solo = re.search(r'\b(\d{3,4})\b', pregunta)
         if codigo_solo:
             codigo = codigo_solo.group(1)
+            codigo_usado = False
             
             # Busca si hay palabra descriptiva
             for palabra_clave, (valor_buscar, columna) in palabras_criterios.items():
                 if palabra_clave in palabras:
+                    codigo_usado = True
                     try:
                         res = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{codigo}%").limit(10).execute()
                         
@@ -136,6 +139,16 @@ def cargar_inventario_supabase(pregunta: str):
                                 return res_filtrado[:6]
                     except:
                         pass
+            
+            # --- NUEVO: Búsqueda directa del código si no tuvo adjetivos ---
+            if not codigo_usado:
+                try:
+                    # Busca el código directamente en Modelo
+                    res = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{codigo}%").limit(10).execute()
+                    if res.data:
+                        resultados.extend(res.data)
+                except Exception as e:
+                    print(f"Error buscando código exacto: {e}")
 
         # =============== 3. DETECTA MERCERÍA vs BOTONES ===============
         palabras_merceria = ["cinta", "palmita", "resorte", "elastico", "elástico", "plastiflecha", "candado", "fleco", "satinado", "bolsas", "contactel", "crochet", "hilo", "botones"]
