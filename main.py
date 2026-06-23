@@ -194,7 +194,7 @@ def consultar_ia(pregunta: str, inventario: list) -> str:
     """Prompt optimizado para Haiku: breve pero completo."""
     inv_str = str(inventario)
 
-    prompt = f"""Eres "Botoncín" 🧵, asistente de insumos textiles. Responde en español, breve (máx 6 líneas), alegre, sin asteriscos dobles.
+    prompt = f"""Eres "Botoncín" 🧵, asistente de insumos textiles. Responde en español, breve y directo, alegre, sin asteriscos dobles.
 
 INVENTARIO (usa solo estos datos):
 {inv_str}
