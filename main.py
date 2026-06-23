@@ -122,7 +122,7 @@ def cargar_inventario_supabase(pregunta: str):
             
             # Busca si hay palabra descriptiva
             for palabra_clave, (valor_buscar, columna) in palabras_criterios.items():
-                if palabra_clave in palabras_filtradas:
+                if palabra_clave in palabras:
                     try:
                         res = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{codigo}%").limit(10).execute()
                         
@@ -139,13 +139,13 @@ def cargar_inventario_supabase(pregunta: str):
 
         # =============== 3. DETECTA MERCERÍA vs BOTONES ===============
         palabras_merceria = ["cinta", "palmita", "resorte", "elastico", "elástico", "plastiflecha", "candado", "fleco", "satinado", "bolsas", "contactel", "crochet", "hilo", "botones"]
-        es_merceria = any(p in palabras_merceria for p in palabras_filtradas)
+        es_merceria = any(p in palabras_merceria for p in palabras)
         
         tabla = "inventario_merceria" if es_merceria else "inventario_botones"
         columnas_busqueda = ["Descripción", "Modelo", "TAGS"] if es_merceria else ["Modelo", "Uso", "TAGS"]
         
         # =============== 4. BÚSQUEDA GENÉRICA POR PALABRAS CLAVE ===============
-        for palabra in palabras_filtradas[:3]:
+        for palabra in palabras[:3]:
             for columna in columnas_busqueda:
                 try:
                     res = supabase.table(tabla).select("*").ilike(columna, f"%{palabra}%").limit(4).execute()
