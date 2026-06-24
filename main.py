@@ -45,8 +45,8 @@ def cargar_inventario_supabase(pregunta: str):
         }
         
         # =============== 1. BÚSQUEDA EXACTA POR CÓDIGO + SUFIJO ===============
-        # Busca: 5936-R, 5936-L, 5936-2, cinta-B, resorte-N, etc.
-        codigo_sufijo_match = re.search(r'\b(\d{3,4})[-]?([RLMB24]{1,2}|CR|cr|Cr)\b', pregunta, re.IGNORECASE)
+        # Busca: 5936-R, 5936-L, 5936-2, cinta-B, resorte-N, fleco-N etc.
+        codigo_sufijo_match = re.search(r'\b([a-zA-Z0-9]+)(?:-|(?<=\d))([RLMBN24]{1,2}|CR|cr|Cr)\b', pregunta, re.IGNORECASE)
         
         if codigo_sufijo_match:
             codigo_base = codigo_sufijo_match.group(1)
