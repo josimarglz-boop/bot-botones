@@ -17,7 +17,10 @@ def cargar_inventario_supabase(pregunta: str):
     try:
         pregunta_lower = pregunta.lower()
         
-        saludos = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa", "dame", "quisiera", "favor"]
+        saludos = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa", 
+                   "dame", "dime", "muestra", "muéstrame", "busco", "necesito", "quiero", 
+                   "quisiera", "favor", "tienes", "tengan", "cuenten", "hay", "algun", "alguna",
+                   "opciones", "opcion", "con", "que", "del", "una", "para", "los", "las", "por"]
         palabras = [p.strip().lower() for p in re.findall(r'\b\w+\b', pregunta) if len(p) > 2 and p not in saludos]
         
         if not palabras:
@@ -45,8 +48,8 @@ def cargar_inventario_supabase(pregunta: str):
         }
         
         # =============== 1. BÚSQUEDA EXACTA POR CÓDIGO + SUFIJO ===============
-        # Busca: 5936-R, 5936-L, 5936-2, cinta-B, resorte-N, fleco-N etc.
-        codigo_sufijo_match = re.search(r'\b([a-zA-Z0-9]+)(?:-|(?<=\d))([RLMBN24]{1,2}|CR|cr|Cr)\b', pregunta, re.IGNORECASE)
+        # Busca: 5936-R, 5936-L, 5936-2, cinta-B, resorte-N, etc.
+        codigo_sufijo_match = re.search(r'\b(\d{3,4})[-]?([RLMB24]{1,2}|CR|cr|Cr)\b', pregunta, re.IGNORECASE)
         
         if codigo_sufijo_match:
             codigo_base = codigo_sufijo_match.group(1)
@@ -116,16 +119,13 @@ def cargar_inventario_supabase(pregunta: str):
             "crudo": ("Crudo", "TAGS"),
         }
         
-       # =============== 2. BÚSQUEDA POR PALABRA DESCRIPTIVA + CÓDIGO ===============
         codigo_solo = re.search(r'\b(\d{3,4})\b', pregunta)
         if codigo_solo:
             codigo = codigo_solo.group(1)
-            codigo_usado = False
             
             # Busca si hay palabra descriptiva
             for palabra_clave, (valor_buscar, columna) in palabras_criterios.items():
                 if palabra_clave in palabras:
-                    codigo_usado = True
                     try:
                         res = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{codigo}%").limit(10).execute()
                         
@@ -139,16 +139,6 @@ def cargar_inventario_supabase(pregunta: str):
                                 return res_filtrado[:6]
                     except:
                         pass
-            
-            # --- NUEVO: Búsqueda directa del código si no tuvo adjetivos ---
-            if not codigo_usado:
-                try:
-                    # Busca el código directamente en Modelo
-                    res = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{codigo}%").limit(10).execute()
-                    if res.data:
-                        resultados.extend(res.data)
-                except Exception as e:
-                    print(f"Error buscando código exacto: {e}")
 
         # =============== 3. DETECTA MERCERÍA vs BOTONES ===============
         palabras_merceria = ["cinta", "palmita", "resorte", "elastico", "elástico", "plastiflecha", "candado", "fleco", "satinado", "bolsas", "contactel", "crochet", "hilo", "botones"]
@@ -158,7 +148,7 @@ def cargar_inventario_supabase(pregunta: str):
         columnas_busqueda = ["Descripción", "Modelo", "TAGS"] if es_merceria else ["Modelo", "Uso", "TAGS"]
         
         # =============== 4. BÚSQUEDA GENÉRICA POR PALABRAS CLAVE ===============
-        for palabra in palabras[:3]:
+        for palabra in palabras[:6]:  # Ampliado: ahora "palabras" ya viene limpia de filler words
             for columna in columnas_busqueda:
                 try:
                     res = supabase.table(tabla).select("*").ilike(columna, f"%{palabra}%").limit(4).execute()
@@ -194,7 +184,7 @@ def consultar_ia(pregunta: str, inventario: list) -> str:
     """Prompt optimizado para Haiku: breve pero completo."""
     inv_str = str(inventario)
 
-    prompt = f"""Eres "Botoncín" 🧵, asistente de insumos textiles. Responde en español, breve y directo, alegre, sin asteriscos dobles.
+    prompt = f"""Eres "Botoncín" 🧵, asistente de insumos textiles. Responde en español, breve (máx 6 líneas), alegre, sin asteriscos dobles.
 
 INVENTARIO (usa solo estos datos):
 {inv_str}
@@ -212,7 +202,7 @@ Instrucciones:
 
     message = client.messages.create(
         model="claude-haiku-4-5",
-        max_tokens=500,
+        max_tokens=350,
         temperature=0.1,
         messages=[{"role": "user", "content": prompt}]
     )
