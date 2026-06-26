@@ -1,3 +1,4 @@
+
 import os
 import re
 from flask import Flask, request
@@ -168,6 +169,26 @@ def cargar_inventario_supabase(pregunta: str):
             except:
                 pass
 
+        # =============== 5.5 BÚSQUEDA POR STOCK MÍNIMO (unidades/piezas) ===============
+        # Detecta: "1500 unidades", "con 2000 piezas", "mínimo 500 unidades"
+        stock_match = re.search(r'(\d{3,6})\s*(?:unidades|piezas|pzs|pz)\b', pregunta_lower)
+        if stock_match:
+            stock_minimo = int(stock_match.group(1))
+            try:
+                # gte = greater than or equal (mayor o igual a)
+                res = supabase.table(tabla).select("*").gte("Stock", stock_minimo).limit(8).execute()
+                if res.data:
+                    # Si ya hay resultados de palabra clave (ej: camisero), cruza ambos filtros
+                    if resultados:
+                        ids_filtrados = {r['id'] for r in res.data}
+                        resultados = [r for r in resultados if r['id'] in ids_filtrados]
+                        if not resultados:  # Si el cruce deja vacío, usa solo el filtro de stock
+                            resultados = res.data
+                    else:
+                        resultados = res.data
+            except Exception as e:
+                print(f"Error filtro stock: {e}")
+
         # =============== 6. ELIMINAR DUPLICADOS Y RETORNAR ===============
         resultados_unicos = {}
         for fila in resultados:
@@ -184,7 +205,7 @@ def consultar_ia(pregunta: str, inventario: list) -> str:
     """Prompt optimizado para Haiku: breve pero completo."""
     inv_str = str(inventario)
 
-    prompt = f"""Eres "Botoncín" 🧵, asistente de insumos textiles. Responde en español, breve (máx 6 líneas), alegre, sin asteriscos dobles.
+    prompt = f"""Eres "Botoncín" 🧵, asistente de insumos textiles. Responde en español, alegre, directo, sin asteriscos dobles (**).
 
 INVENTARIO (usa solo estos datos):
 {inv_str}
@@ -193,16 +214,39 @@ Pregunta: "{pregunta}"
 
 Instrucciones:
 1. Saludo: Si saludan genérico → "¡Hola! Soy Botoncín 🧵 ¿Qué buscas?". Si piden producto → directo.
-2. Stock: Revisa la columna 'Stock'. Si >0 → disponible. Si 0 → "No hay stock". Si vacío → "No encontré ese modelo".
-3. Unidades: Si piden mazos (1 mazo=1728 pzs) o gruesas (1 gruesa=144 pzs), calcula si hay suficiente. Ej: "Pides 2 mazos = 3456 pzs, tengo 5000 ✓".
-4. Sufijos: Si mencionan -R=Rayado, -L=Liso, -M=Mate, -B=Brillante, -2=2hoyos, -4=4hoyos, resáltalo en respuesta.
-5. Formato: Modelo • Tamaño • Hoyos/Acabado • Stock • Fecha llegada (si existe) • Link imagen. Usa emojis, saltos línea.
-6. TAGS: Si incluyen "Teñible", "Básico", resalta eso.
+2. Stock: Revisa columna 'Stock'. Si >0 → disponible. Si 0 → "No hay stock". Si inventario vacío → explica que no hay coincidencia exacta y sugiere alternativas si las hay.
+3. Unidades: Si piden mazos (1 mazo=1728 pzs) o gruesas (1 gruesa=144 pzs), calcula si hay suficiente.
+4. Sufijos botones: -R=Rayado, -L=Liso, -M=Mate, -B=Brillante, -2=2hoyos, -4=4hoyos, resáltalo.
+5. Sufijos mercería: -B=Blanco, -N=Negro, -M=Marino, -CR=Crudo, resáltalo.
+6. TAGS: Si incluyen "Teñible", "Básico", resáltalo.
+7. IMPORTANTE: Usa SOLO los campos que existan en el dato (no inventes ni dejes campos vacíos). Si un producto no tiene Tamaño/Hoyos (ej: mercería), omite esas líneas.
+
+FORMATO si el producto es un BOTÓN (tiene campos Tamaño/Hoyos/Acabado):
+*Opción N:*
+🔷 Modelo: [modelo]
+📏 Tamaño: [tamaño]
+⚪ Hoyos: [hoyos]
+✨ Acabado: [acabado]
+🎨 Tono: [tono]
+👔 Uso: [uso]
+🏷️ Tags: [tags]
+📦 Stock: [stock] unidades
+🖼️ Imagen: [link]
+
+FORMATO si el producto es MERCERÍA (tiene campo Descripción, no tiene Tamaño/Hoyos):
+*Opción N:*
+🔷 Modelo: [modelo]
+📝 Descripción: [descripción]
+🏷️ Tags: [tags]
+📦 Stock: [stock] unidades
+🖼️ Imagen: [link]
+
+Separa cada opción con línea en blanco. Numéralas si hay varias. Sé breve en el texto introductorio.
 """
 
     message = client.messages.create(
         model="claude-haiku-4-5",
-        max_tokens=350,
+        max_tokens=550,  # Ligero incremento para soportar formato visual con varios productos
         temperature=0.1,
         messages=[{"role": "user", "content": prompt}]
     )
