@@ -270,6 +270,12 @@ def webhook():
 def health():
     return "✅ Botoncín Sufijos Ultra-Inteligente v3 en Render", 200
 
+@app.route("/test", methods=["GET"])
+def test_busqueda():
+    pregunta = request.args.get("q", "")
+    resultados = cargar_inventario_supabase(pregunta)
+    return {"pregunta": pregunta, "resultados": resultados, "total": len(resultados)}
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
