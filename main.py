@@ -1,4 +1,3 @@
-
 import os
 import re
 from flask import Flask, request
@@ -169,20 +168,34 @@ def cargar_inventario_supabase(pregunta: str):
             except:
                 pass
 
-        # =============== 5.5 BÚSQUEDA POR STOCK MÍNIMO (unidades/piezas) ===============
-        # Detecta: "1500 unidades", "con 2000 piezas", "mínimo 500 unidades"
-        stock_match = re.search(r'(\d{3,6})\s*(?:unidades|piezas|pzs|pz)\b', pregunta_lower)
-        if stock_match:
+        # =============== 5.5 BÚSQUEDA POR STOCK MÍNIMO (unidades, piezas, mazos, gruesas) ===============
+        stock_minimo = None
+
+        # Detecta mazos → convierte a piezas (1 mazo = 1728 pzs)
+        mazos_match = re.search(r'(\d+)\s*mazos?\b', pregunta_lower)
+        if mazos_match:
+            stock_minimo = int(mazos_match.group(1)) * 1728
+            print(f"Detectado: {mazos_match.group(1)} mazos = {stock_minimo} piezas mínimas")
+
+        # Detecta gruesas → convierte a piezas (1 gruesa = 144 pzs)
+        elif re.search(r'(\d+)\s*gruesas?\b', pregunta_lower):
+            gruesas_match = re.search(r'(\d+)\s*gruesas?\b', pregunta_lower)
+            stock_minimo = int(gruesas_match.group(1)) * 144
+            print(f"Detectado: {gruesas_match.group(1)} gruesas = {stock_minimo} piezas mínimas")
+
+        # Detecta unidades/piezas directas
+        elif re.search(r'(\d{3,6})\s*(?:unidades|piezas|pzs|pz)\b', pregunta_lower):
+            stock_match = re.search(r'(\d{3,6})\s*(?:unidades|piezas|pzs|pz)\b', pregunta_lower)
             stock_minimo = int(stock_match.group(1))
+
+        if stock_minimo is not None:
             try:
-                # gte = greater than or equal (mayor o igual a)
                 res = supabase.table(tabla).select("*").gte("Stock", stock_minimo).limit(8).execute()
                 if res.data:
-                    # Si ya hay resultados de palabra clave (ej: camisero), cruza ambos filtros
                     if resultados:
                         ids_filtrados = {r['id'] for r in res.data}
                         resultados = [r for r in resultados if r['id'] in ids_filtrados]
-                        if not resultados:  # Si el cruce deja vacío, usa solo el filtro de stock
+                        if not resultados:
                             resultados = res.data
                     else:
                         resultados = res.data
@@ -269,12 +282,6 @@ def webhook():
 @app.route("/", methods=["GET"])
 def health():
     return "✅ Botoncín Sufijos Ultra-Inteligente v3 en Render", 200
-
-@app.route("/test", methods=["GET"])
-def test_busqueda():
-    pregunta = request.args.get("q", "")
-    resultados = cargar_inventario_supabase(pregunta)
-    return {"pregunta": pregunta, "resultados": resultados, "total": len(resultados)}
 
 
 if __name__ == "__main__":
