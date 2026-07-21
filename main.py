@@ -162,9 +162,17 @@ def cargar_inventario_supabase(pregunta: str):
         if tamaño_match and tabla == "inventario_botones":
             tamaño = int(tamaño_match.group(1))
             try:
-                res = supabase.table(tabla).select("*").eq("Tamaño", tamaño).limit(6).execute()
+                res = supabase.table(tabla).select("*").eq("Tamaño", tamaño).limit(10).execute()
                 if res.data:
-                    resultados.extend(res.data)
+                    if resultados:
+                        # Cruza: solo los que ya encontramos Y tienen el tamaño correcto
+                        ids_tamaño = {r['id'] for r in res.data}
+                        resultados = [r for r in resultados if r['id'] in ids_tamaño]
+                        if not resultados:
+                            # Si el cruce queda vacío, usa solo los del tamaño pedido
+                            resultados = res.data
+                    else:
+                        resultados = res.data
             except:
                 pass
 
@@ -279,11 +287,9 @@ def webhook():
     return str(resp)
 
 
-@app.route("/test", methods=["GET"])
-def test_busqueda():
-    pregunta = request.args.get("q", "")
-    resultados = cargar_inventario_supabase(pregunta)
-    return {"pregunta": pregunta, "resultados": resultados, "total": len(resultados)}
+@app.route("/", methods=["GET"])
+def health():
+    return "✅ Botoncín Sufijos Ultra-Inteligente v3 en Render", 200
 
 
 if __name__ == "__main__":
