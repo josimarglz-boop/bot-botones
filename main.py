@@ -13,212 +13,134 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def cargar_inventario_supabase(pregunta: str):
-    """Búsqueda ultra-inteligente: entiende sufijos (5936-R=rayado, 5936-L=liso, cinta-B=blanco)."""
+    """Búsqueda con filtros encadenados directamente en Supabase."""
     try:
         pregunta_lower = pregunta.lower()
-        
-        saludos = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa", 
-                   "dame", "dime", "muestra", "muéstrame", "busco", "necesito", "quiero", 
-                   "quisiera", "favor", "tienes", "tengan", "cuenten", "hay", "algun", "alguna",
-                   "opciones", "opcion", "con", "que", "del", "una", "para", "los", "las", "por"]
-        palabras = [p.strip().lower() for p in re.findall(r'\b\w+\b', pregunta) if len(p) > 2 and p not in saludos]
-        
-        if not palabras:
+
+        # Palabras vacías que no aportan a la búsqueda
+        stopwords = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa",
+                     "dame", "dime", "muestra", "muéstrame", "busco", "necesito", "quiero",
+                     "quisiera", "favor", "tienes", "tengan", "cuenten", "hay", "algun", "alguna",
+                     "opciones", "opcion", "con", "que", "del", "una", "para", "los", "las", "por",
+                     "boton", "botón", "modelo", "talla", "tamaño", "unidades", "piezas"]
+        palabras = [p.strip().lower() for p in re.findall(r'\b\w+\b', pregunta)
+                    if len(p) > 2 and p not in stopwords]
+
+        if not palabras and not re.search(r'\d', pregunta):
             return []
 
-        resultados = []
-        
-        # =============== MAPEO DE SUFIJOS ===============
-        # Botones: sufijos en TAGS o columnas específicas
-        sufijo_botones = {
-            "r": ("rayado", "TAGS"),      # -R = Rayado (en TAGS)
-            "l": ("liso", "TAGS"),         # -L = Liso (en TAGS)
-            "m": ("mate", "Acabado"),      # -M = Mate (columna Acabado)
-            "b": ("brillante", "Acabado"), # -B = Brillante (columna Acabado)
-            "2": ("2 hoyos", "Hoyos"),    # -2 = 2 hoyos (columna Hoyos)
-            "4": ("4 hoyos", "Hoyos"),    # -4 = 4 hoyos (columna Hoyos)
-        }
-        
-        # Mercería: sufijos de colores en TAGS
-        sufijo_merceria = {
-            "b": "Blanco",    # -B = Blanco
-            "n": "Negro",     # -N = Negro
-            "m": "Marino",    # -M = Marino
-            "cr": "Crudo",    # -CR = Crudo
-        }
-        
-        # =============== 1. BÚSQUEDA EXACTA POR CÓDIGO + SUFIJO ===============
-        # Busca: 5936-R, 5936-L, 5936-2, cinta-B, resorte-N, etc.
-        codigo_sufijo_match = re.search(r'\b(\d{3,4})[-]?([RLMB24]{1,2}|CR|cr|Cr)\b', pregunta, re.IGNORECASE)
-        
-        if codigo_sufijo_match:
-            codigo_base = codigo_sufijo_match.group(1)
-            sufijo = codigo_sufijo_match.group(2).lower()
-            
-            # Detecta si es botón o mercería
-            es_merceria = any(p in palabras for p in ["cinta", "resorte", "elastico", "elástico", "hilo", "encaje"])
-            tabla = "inventario_merceria" if es_merceria else "inventario_botones"
-            
-            try:
-                if tabla == "inventario_botones" and sufijo in sufijo_botones:
-                    valor_busqueda, columna = sufijo_botones[sufijo]
-                    
-                    # Primero busca el código base exacto
-                    res = supabase.table(tabla).select("*").ilike("Modelo", f"%{codigo_base}%").limit(10).execute()
-                    
-                    if res.data:
-                        # Filtra por el criterio del sufijo
-                        res_filtrado = []
-                        for r in res.data:
-                            if columna == "TAGS":
-                                if valor_busqueda.lower() in r.get("TAGS", "").lower():
-                                    res_filtrado.append(r)
-                            elif columna == "Acabado":
-                                if valor_busqueda.lower() in r.get("Acabado", "").lower():
-                                    res_filtrado.append(r)
-                            elif columna == "Hoyos":
-                                hoyos_val = r.get("Hoyos", "")
-                                if valor_busqueda in hoyos_val or str(valor_busqueda.split()[0]) in hoyos_val:
-                                    res_filtrado.append(r)
-                        
-                        if res_filtrado:
-                            return res_filtrado[:6]
-                        else:
-                            return res.data[:6]  # Si no hay sufijo exacto, retorna todas las variantes
-                
-                elif tabla == "inventario_merceria" and sufijo in sufijo_merceria:
-                    color = sufijo_merceria[sufijo]
-                    res = supabase.table(tabla).select("*").ilike("Modelo", f"%{codigo_base}%").limit(10).execute()
-                    
-                    if res.data:
-                        # Filtra por color en TAGS o Descripción
-                        res_filtrado = []
-                        for r in res.data:
-                            if color.lower() in r.get("TAGS", "").lower() or color.lower() in r.get("Descripción", "").lower():
-                                res_filtrado.append(r)
-                        
-                        if res_filtrado:
-                            return res_filtrado[:6]
-                        return res.data[:6]
-            
-            except Exception as e:
-                print(f"Error búsqueda sufijo: {e}")
+        # =============== EXTRAE TODOS LOS CRITERIOS DE LA PREGUNTA ===============
 
-        # =============== 2. BÚSQUEDA POR PALABRA DESCRIPTIVA + CÓDIGO ===============
-        # Ej: "botón 5936 rayado" → busca 5936 con "rayado" en TAGS
-        # Ej: "botón 5936 liso" → busca 5936 con "liso" en TAGS
-        
-        palabras_criterios = {
-            "rayado": ("rayado", "TAGS"),
-            "liso": ("liso", "TAGS"),
-            "mate": ("mate", "Acabado"),
-            "brillante": ("brillante", "Acabado"),
-            "blanco": ("Blanco", "TAGS"),
-            "negro": ("Negro", "TAGS"),
-            "marino": ("Marino", "TAGS"),
-            "crudo": ("Crudo", "TAGS"),
-        }
-        
-        codigo_solo = re.search(r'\b(\d{3,4})\b', pregunta)
-        if codigo_solo:
-            codigo = codigo_solo.group(1)
-            
-            # Busca si hay palabra descriptiva
-            for palabra_clave, (valor_buscar, columna) in palabras_criterios.items():
-                if palabra_clave in palabras:
+        # 1. Código + sufijo (ej: 5936-R, 5936-L)
+        codigo_sufijo = re.search(r'\b(\d{3,4})[-]?([RLMBrlmb24]{1,2}|CR|cr)\b', pregunta)
+        codigo_base = codigo_sufijo.group(1) if codigo_sufijo else None
+        sufijo = codigo_sufijo.group(2).lower() if codigo_sufijo else None
+
+        # Si no hay sufijo, busca código solo (ej: 5936)
+        if not codigo_base:
+            codigo_solo = re.search(r'\b(\d{3,4})\b', pregunta)
+            codigo_base = codigo_solo.group(1) if codigo_solo else None
+
+        # 2. Tamaño (ej: "tamaño 30", "talla 16")
+        tamaño_match = re.search(r'(?:talla|tamaño|linea|línea)\s*(\d+)', pregunta_lower)
+        tamaño = tamaño_match.group(1) if tamaño_match else None
+
+        # 3. Hoyos (ej: "2 hoyos", "4 hoyos")
+        hoyos = None
+        if re.search(r'2\s*hoyo|dos\s*hoyo', pregunta_lower):
+            hoyos = "2 hoyos"
+        elif re.search(r'4\s*hoyo|cuatro\s*hoyo', pregunta_lower):
+            hoyos = "4 hoyos"
+
+        # 4. Acabado (ej: "mate", "brillante", sufijo -M, -B)
+        acabado = None
+        sufijo_acabado = {"m": "Mate", "b": "Brillante"}
+        if sufijo in sufijo_acabado:
+            acabado = sufijo_acabado[sufijo]
+        elif "mate" in palabras:
+            acabado = "Mate"
+        elif "brillante" in palabras:
+            acabado = "Brillante"
+
+        # 5. TAGS por sufijo o palabra (rayado, liso)
+        tag_filtro = None
+        if sufijo == "r" or "rayado" in palabras:
+            tag_filtro = "rayado"
+        elif sufijo == "l" or "liso" in palabras:
+            tag_filtro = "liso"
+        elif "teñible" in palabras or "teñir" in palabras:
+            tag_filtro = "teñible"
+
+        # 6. Uso (ej: "camisero", "sastre", "fantasía")
+        uso = None
+        if any(p in palabras for p in ["camisero", "camisa"]):
+            uso = "Camisero"
+        elif any(p in palabras for p in ["sastre", "pantalon", "pantalón", "saco"]):
+            uso = "Sastre"
+        elif any(p in palabras for p in ["fantasia", "fantasía", "vintage", "decorativo"]):
+            uso = "Fantasía"
+
+        # 7. Stock mínimo (mazos, gruesas, unidades)
+        stock_minimo = None
+        mazos_m = re.search(r'(\d+)\s*mazos?\b', pregunta_lower)
+        gruesas_m = re.search(r'(\d+)\s*gruesas?\b', pregunta_lower)
+        unidades_m = re.search(r'(\d{3,6})\s*(?:unidades|piezas|pzs)\b', pregunta_lower)
+        if mazos_m:
+            stock_minimo = int(mazos_m.group(1)) * 1728
+            print(f"Stock mínimo: {mazos_m.group(1)} mazos = {stock_minimo} pzs")
+        elif gruesas_m:
+            stock_minimo = int(gruesas_m.group(1)) * 144
+            print(f"Stock mínimo: {gruesas_m.group(1)} gruesas = {stock_minimo} pzs")
+        elif unidades_m:
+            stock_minimo = int(unidades_m.group(1))
+
+        # 8. Detecta mercería vs botones
+        palabras_merceria = ["cinta", "palmita", "resorte", "elastico", "elástico",
+                             "plastiflecha", "candado", "fleco", "satinado", "hilo", "encaje"]
+        es_merceria = any(p in palabras for p in palabras_merceria)
+        tabla = "inventario_merceria" if es_merceria else "inventario_botones"
+
+        # =============== CONSTRUYE QUERY ENCADENADO EN SUPABASE ===============
+        query = supabase.table(tabla).select("*")
+
+        # Aplica filtros en orden de especificidad
+        if codigo_base:
+            query = query.ilike("Modelo", f"%{codigo_base}%")
+        if tamaño and not es_merceria:
+            query = query.eq("Tamaño", tamaño)
+        if hoyos and not es_merceria:
+            query = query.eq("Hoyos", hoyos)
+        if acabado and not es_merceria:
+            query = query.eq("Acabado", acabado)
+        if tag_filtro:
+            query = query.ilike("TAGS", f"%{tag_filtro}%")
+        if uso and not es_merceria:
+            query = query.eq("Uso", uso)
+        if stock_minimo:
+            query = query.gte("Stock", stock_minimo)
+
+        # Si no hay ningún criterio específico, busca por palabras clave en columnas
+        if not any([codigo_base, tamaño, hoyos, acabado, tag_filtro, uso, stock_minimo]):
+            columnas = ["Descripción", "Modelo", "TAGS"] if es_merceria else ["Modelo", "Uso", "TAGS"]
+            resultados = []
+            for palabra in palabras[:4]:
+                for col in columnas:
                     try:
-                        res = supabase.table("inventario_botones").select("*").ilike("Modelo", f"%{codigo}%").limit(10).execute()
-                        
+                        res = supabase.table(tabla).select("*").ilike(col, f"%{palabra}%").limit(4).execute()
                         if res.data:
-                            res_filtrado = []
-                            for r in res.data:
-                                if valor_buscar.lower() in r.get(columna, "").lower():
-                                    res_filtrado.append(r)
-                            
-                            if res_filtrado:
-                                return res_filtrado[:6]
+                            resultados.extend(res.data)
                     except:
                         pass
+            unicos = {r['id']: r for r in resultados}
+            return list(unicos.values())[:6]
 
-        # =============== 3. DETECTA MERCERÍA vs BOTONES ===============
-        palabras_merceria = ["cinta", "palmita", "resorte", "elastico", "elástico", "plastiflecha", "candado", "fleco", "satinado", "bolsas", "contactel", "crochet", "hilo", "botones"]
-        es_merceria = any(p in palabras_merceria for p in palabras)
-        
-        tabla = "inventario_merceria" if es_merceria else "inventario_botones"
-        columnas_busqueda = ["Descripción", "Modelo", "TAGS"] if es_merceria else ["Modelo", "Uso", "TAGS"]
-        
-        # =============== 4. BÚSQUEDA GENÉRICA POR PALABRAS CLAVE ===============
-        for palabra in palabras[:6]:  # Ampliado: ahora "palabras" ya viene limpia de filler words
-            for columna in columnas_busqueda:
-                try:
-                    res = supabase.table(tabla).select("*").ilike(columna, f"%{palabra}%").limit(4).execute()
-                    if res.data:
-                        resultados.extend(res.data)
-                except:
-                    pass
-
-        # =============== 5. BÚSQUEDA POR TAMAÑO ===============
-        tamaño_match = re.search(r'(?:talla|tamaño|ancho|mm|línea|linea)\s*(\d+)', pregunta)
-        if tamaño_match and tabla == "inventario_botones":
-            tamaño = tamaño_match.group(1)  # String, porque Supabase lo guarda como texto
-            try:
-                res = supabase.table(tabla).select("*").eq("Tamaño", tamaño).limit(10).execute()
-                if res.data:
-                    if resultados:
-                        # Cruza: solo los que ya encontramos Y tienen el tamaño correcto
-                        ids_tamaño = {r['id'] for r in res.data}
-                        resultados = [r for r in resultados if r['id'] in ids_tamaño]
-                        if not resultados:
-                            resultados = res.data
-                    else:
-                        resultados = res.data
-            except:
-                pass
-
-        # =============== 5.5 BÚSQUEDA POR STOCK MÍNIMO (unidades, piezas, mazos, gruesas) ===============
-        stock_minimo = None
-
-        # Detecta mazos → convierte a piezas (1 mazo = 1728 pzs)
-        mazos_match = re.search(r'(\d+)\s*mazos?\b', pregunta_lower)
-        if mazos_match:
-            stock_minimo = int(mazos_match.group(1)) * 1728
-            print(f"Detectado: {mazos_match.group(1)} mazos = {stock_minimo} piezas mínimas")
-
-        # Detecta gruesas → convierte a piezas (1 gruesa = 144 pzs)
-        elif re.search(r'(\d+)\s*gruesas?\b', pregunta_lower):
-            gruesas_match = re.search(r'(\d+)\s*gruesas?\b', pregunta_lower)
-            stock_minimo = int(gruesas_match.group(1)) * 144
-            print(f"Detectado: {gruesas_match.group(1)} gruesas = {stock_minimo} piezas mínimas")
-
-        # Detecta unidades/piezas directas
-        elif re.search(r'(\d{3,6})\s*(?:unidades|piezas|pzs|pz)\b', pregunta_lower):
-            stock_match = re.search(r'(\d{3,6})\s*(?:unidades|piezas|pzs|pz)\b', pregunta_lower)
-            stock_minimo = int(stock_match.group(1))
-
-        if stock_minimo is not None:
-            try:
-                res = supabase.table(tabla).select("*").gte("Stock", stock_minimo).limit(8).execute()
-                if res.data:
-                    if resultados:
-                        ids_filtrados = {r['id'] for r in res.data}
-                        resultados = [r for r in resultados if r['id'] in ids_filtrados]
-                        if not resultados:
-                            resultados = res.data
-                    else:
-                        resultados = res.data
-            except Exception as e:
-                print(f"Error filtro stock: {e}")
-
-        # =============== 6. ELIMINAR DUPLICADOS Y RETORNAR ===============
-        resultados_unicos = {}
-        for fila in resultados:
-            resultados_unicos[fila['id']] = fila
-        
-        return list(resultados_unicos.values())[:6]
+        resultado = query.limit(6).execute()
+        return resultado.data if resultado.data else []
 
     except Exception as e:
-        print(f"Error filtrando en Supabase: {e}")
+        print(f"Error en búsqueda: {e}")
         return []
+
 
 
 def consultar_ia(pregunta: str, inventario: list) -> str:
