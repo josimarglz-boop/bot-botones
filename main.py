@@ -162,7 +162,10 @@ Instrucciones:
 5. Sufijos mercería: -B=Blanco, -N=Negro, -M=Marino, -CR=Crudo, resáltalo.
 6. TAGS: Si incluyen "Teñible", "Básico", resáltalo.
 7. IMPORTANTE: Usa SOLO los campos que existan en el dato (no inventes ni dejes campos vacíos). Si un producto no tiene Tamaño/Hoyos (ej: mercería), omite esas líneas.
-
+8. NO hagas preguntas de seguimiento ni invites a continuar la conversación. 
+   Termina siempre con la información solicitada, sin frases como 
+   "¿Te interesa alguna?" o "¿Necesitas más información?".
+    
 FORMATO si el producto es un BOTÓN (tiene campos Tamaño/Hoyos/Acabado):
 *Opción N:*
 🔷 Modelo: [modelo]
