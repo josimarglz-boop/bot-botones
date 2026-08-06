@@ -32,13 +32,13 @@ def cargar_inventario_supabase(pregunta: str):
         # =============== EXTRAE TODOS LOS CRITERIOS DE LA PREGUNTA ===============
 
         # 1. Código + sufijo (ej: 5936-R, 5936-L)
-        codigo_sufijo = re.search(r'\b(\d{3,4})[-]?([RLMBrlmb24]{1,2}|CR|cr)\b', pregunta)
+        codigo_sufijo = re.search(r'\b[Bb]?(\d{3,4})[-]?([RLMBrlmb24]{1,2}|CR|cr)\b', pregunta)
         codigo_base = codigo_sufijo.group(1) if codigo_sufijo else None
         sufijo = codigo_sufijo.group(2).lower() if codigo_sufijo else None
 
         # Si no hay sufijo, busca código solo (ej: 5936)
         if not codigo_base:
-            codigo_solo = re.search(r'\b(\d{3,4})\b', pregunta)
+            codigo_solo = re.search(r'\b[Bb]?(\d{3,4})\b', pregunta)
             codigo_base = codigo_solo.group(1) if codigo_solo else None
 
         # 2. Tamaño (ej: "tamaño 30", "talla 16")
