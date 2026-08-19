@@ -189,6 +189,13 @@ FORMATO si el producto es MERCERÍA (tiene campo Descripción, no tiene Tamaño/
 Separa cada opción con línea en blanco. Numéralas si hay varias. Sé breve en el texto introductorio.
 """
 
+        # En webhook(), antes de procesar el mensaje:
+MANTENIMIENTO = os.environ.get("MANTENIMIENTO", "false")
+if MANTENIMIENTO.lower() == "true":
+    resp = MessagingResponse()
+    resp.message("🔧 Botoncín está en mantenimiento. Estaremos de vuelta en unos momentos. ¡Gracias por tu paciencia!")
+    return str(resp)
+
     message = client.messages.create(
         model="claude-haiku-4-5",
         max_tokens=550,  # Ligero incremento para soportar formato visual con varios productos
@@ -209,6 +216,8 @@ def webhook():
     resp = MessagingResponse()
     resp.message(respuesta_texto)
     return str(resp)
+
+
 
 
 @app.route("/", methods=["GET"])
