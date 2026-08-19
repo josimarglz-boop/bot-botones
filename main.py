@@ -31,19 +31,48 @@ def cargar_inventario_supabase(pregunta: str):
 
         # =============== EXTRAE TODOS LOS CRITERIOS DE LA PREGUNTA ===============
 
-        # 1. Código + sufijo (ej: 5936-R, 5936-L)
-        codigo_sufijo = re.search(r'\b[Bb]?(\d{3,4})[-]?([RLMBrlmb24]{1,2}|CR|cr)\b', pregunta)
-        codigo_base = codigo_sufijo.group(1) if codigo_sufijo else None
-        sufijo = codigo_sufijo.group(2).lower() if codigo_sufijo else None
+        # 1. Código + sufijo
+        # Maneja: 5936-R, 5936-L, B5936-R, B555830-B (código pegado con tamaño)
+        codigo_sufijo = re.search(r'\b[Bb]?(\d{3,6})[-]([RLMBrlmb24]{1,2}|CR|cr)\b', pregunta)
+        codigo_base = None
+        sufijo = None
 
-        # Si no hay sufijo, busca código solo (ej: 5936)
+        if codigo_sufijo:
+            codigo_raw = codigo_sufijo.group(1)
+            sufijo = codigo_sufijo.group(2).lower()
+            # Si el número tiene más de 4 dígitos, los últimos 2 podrían ser el tamaño
+            # Ej: "555830" → código "5558", tamaño "30"
+            if len(codigo_raw) > 4:
+                codigo_base = codigo_raw[:4]
+                if not tamaño_match:
+                    tamaño = codigo_raw[4:]  # extrae tamaño pegado
+            else:
+                codigo_base = codigo_raw
+        
+        # Sin sufijo: busca código solo (ej: 5936, B5936, B555830)
         if not codigo_base:
-            codigo_solo = re.search(r'\b[Bb]?(\d{3,4})\b', pregunta)
-            codigo_base = codigo_solo.group(1) if codigo_solo else None
+            codigo_solo = re.search(r'\b[Bb]?(\d{3,6})\b', pregunta)
+            if codigo_solo:
+                codigo_raw = codigo_solo.group(1)
+                if len(codigo_raw) > 4:
+                    codigo_base = codigo_raw[:4]
+                    if not tamaño_match:
+                        tamaño = codigo_raw[4:]
+                else:
+                    codigo_base = codigo_raw
 
-        # 2. Tamaño (ej: "tamaño 30", "talla 16")
-        tamaño_match = re.search(r'(?:talla|tamaño|linea|línea)\s*(\d+)', pregunta_lower)
-        tamaño = tamaño_match.group(1) if tamaño_match else None
+        # 2. Tamaño (ej: "tamaño 30", "talla 16", o número suelto después del código)
+        tamaño_match = re.search(r'(?:talla|tamaño|linea|línea|en)\s*(\d+)', pregunta_lower)
+        if tamaño_match:
+            tamaño = tamaño_match.group(1)
+        elif not tamaño:
+            # Detecta número suelto que no sea el código (ej: "5936 en 20 rayado")
+            numeros = re.findall(r'\b(\d{2})\b', pregunta)
+            tamaños_validos = ["12","14","16","18","20","24","28","30","36","40","45","54","60"]
+            for n in numeros:
+                if n in tamaños_validos:
+                    tamaño = n
+                    break
 
         # 3. Hoyos (ej: "2 hoyos", "4 hoyos")
         hoyos = None
@@ -189,8 +218,6 @@ FORMATO si el producto es MERCERÍA (tiene campo Descripción, no tiene Tamaño/
 Separa cada opción con línea en blanco. Numéralas si hay varias. Sé breve en el texto introductorio.
 """
 
-
-
     message = client.messages.create(
         model="claude-haiku-4-5",
         max_tokens=550,  # Ligero incremento para soportar formato visual con varios productos
@@ -205,12 +232,12 @@ def webhook():
     """Recibe mensajes de WhatsApp vía Twilio."""
     mensaje_entrante = request.form.get("Body", "").strip()
 
-          # En webhook(), antes de procesar el mensaje:
-MANTENIMIENTO = os.environ.get("MANTENIMIENTO", "false")
-if MANTENIMIENTO.lower() == "true":
-    resp = MessagingResponse()
-    resp.message("🔧 Botoncín está en mantenimiento. Estaremos de vuelta en unos momentos. ¡Gracias por tu paciencia!")
-    return str(resp)
+    # Modo mantenimiento
+    MANTENIMIENTO = os.environ.get("MANTENIMIENTO", "false")
+    if MANTENIMIENTO.lower() == "true":
+        resp = MessagingResponse()
+        resp.message("🔧 Botoncín está en mantenimiento.\nEstaremos de vuelta en unos momentos. ¡Gracias por tu paciencia! 😊")
+        return str(resp)
     
     inventario = cargar_inventario_supabase(mensaje_entrante)
     respuesta_texto = consultar_ia(mensaje_entrante, inventario)
@@ -219,9 +246,16 @@ if MANTENIMIENTO.lower() == "true":
     resp.message(respuesta_texto)
     return str(resp)
 
+
 @app.route("/", methods=["GET"])
 def health():
     return "✅ Botoncín Sufijos Ultra-Inteligente v3 en Render", 200
+
+@app.route("/test", methods=["GET"])
+def test_busqueda():
+    pregunta = request.args.get("q", "")
+    resultados = cargar_inventario_supabase(pregunta)
+    return {"pregunta": pregunta, "resultados": resultados, "total": len(resultados)}
 
 
 if __name__ == "__main__":
