@@ -189,12 +189,7 @@ FORMATO si el producto es MERCERÍA (tiene campo Descripción, no tiene Tamaño/
 Separa cada opción con línea en blanco. Numéralas si hay varias. Sé breve en el texto introductorio.
 """
 
-        # En webhook(), antes de procesar el mensaje:
-MANTENIMIENTO = os.environ.get("MANTENIMIENTO", "false")
-if MANTENIMIENTO.lower() == "true":
-    resp = MessagingResponse()
-    resp.message("🔧 Botoncín está en mantenimiento. Estaremos de vuelta en unos momentos. ¡Gracias por tu paciencia!")
-    return str(resp)
+
 
     message = client.messages.create(
         model="claude-haiku-4-5",
@@ -209,6 +204,13 @@ if MANTENIMIENTO.lower() == "true":
 def webhook():
     """Recibe mensajes de WhatsApp vía Twilio."""
     mensaje_entrante = request.form.get("Body", "").strip()
+
+          # En webhook(), antes de procesar el mensaje:
+MANTENIMIENTO = os.environ.get("MANTENIMIENTO", "false")
+if MANTENIMIENTO.lower() == "true":
+    resp = MessagingResponse()
+    resp.message("🔧 Botoncín está en mantenimiento. Estaremos de vuelta en unos momentos. ¡Gracias por tu paciencia!")
+    return str(resp)
     
     inventario = cargar_inventario_supabase(mensaje_entrante)
     respuesta_texto = consultar_ia(mensaje_entrante, inventario)
@@ -216,9 +218,6 @@ def webhook():
     resp = MessagingResponse()
     resp.message(respuesta_texto)
     return str(resp)
-
-
-
 
 @app.route("/", methods=["GET"])
 def health():
