@@ -233,11 +233,11 @@ def webhook():
     mensaje_entrante = request.form.get("Body", "").strip()
 
     # Modo mantenimiento
-    MANTENIMIENTO = os.environ.get("MANTENIMIENTO", "false")
+    /* MANTENIMIENTO = os.environ.get("MANTENIMIENTO", "false")
     if MANTENIMIENTO.lower() == "true":
         resp = MessagingResponse()
         resp.message("🔧 Botoncín está en mantenimiento.\nEstaremos de vuelta en unos momentos. ¡Gracias por tu paciencia! 😊")
-        return str(resp)
+        return str(resp) /* 
     
     inventario = cargar_inventario_supabase(mensaje_entrante)
     respuesta_texto = consultar_ia(mensaje_entrante, inventario)
