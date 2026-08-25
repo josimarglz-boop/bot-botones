@@ -22,7 +22,7 @@ def cargar_inventario_supabase(pregunta: str):
                      "dame", "dime", "muestra", "muéstrame", "busco", "necesito", "quiero",
                      "quisiera", "favor", "tienes", "tengan", "cuenten", "hay", "algun", "alguna",
                      "opciones", "opcion", "con", "que", "del", "una", "para", "los", "las", "por",
-                     "boton", "botón", "modelo", "talla", "tamaño", "unidades", "piezas"]
+                     ]
         palabras = [p.strip().lower() for p in re.findall(r'\b\w+\b', pregunta)
                     if len(p) > 2 and p not in stopwords]
 
