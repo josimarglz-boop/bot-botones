@@ -132,6 +132,17 @@ def cargar_inventario_supabase(pregunta: str):
         # =============== CONSTRUYE QUERY ENCADENADO EN SUPABASE ===============
         query = supabase.table(tabla).select("*")
 
+        # Palabras ya usadas como criterios específicos — no buscarlas de nuevo en TAGS
+        palabras_usadas = set()
+        if acabado: palabras_usadas.update(["mate", "brillante"])
+        if uso: palabras_usadas.update(["camisero", "camisa", "sastre", "pantalon", "saco", "fantasia", "fantasía", "vintage", "decorativo"])
+        if tag_filtro: palabras_usadas.update(["rayado", "liso", "teñible", "teñir"])
+
+        # Palabras libres = las que no son criterios conocidos → posibles TAGS (ej: "Coco", "Concha")
+        palabras_libres = [p for p in palabras if p not in palabras_usadas
+                          and p not in ["boton", "botón", "talla", "tamaño", "estilo", "tipo"]
+                          and not p.isdigit()]
+
         # Aplica filtros en orden de especificidad
         if codigo_base:
             query = query.ilike("Modelo", f"%{codigo_base}%")
@@ -148,8 +159,12 @@ def cargar_inventario_supabase(pregunta: str):
         if stock_minimo:
             query = query.gte("Stock", stock_minimo)
 
-        # Si no hay ningún criterio específico, busca por palabras clave en columnas
-        if not any([codigo_base, tamaño, hoyos, acabado, tag_filtro, uso, stock_minimo]):
+        # Si hay palabras libres (ej: "Coco", "vintage", "Concha"), busca en TAGS
+        if palabras_libres:
+            query = query.ilike("TAGS", f"%{palabras_libres[0]}%")
+
+        # Si no hay ningún criterio específico ni palabras libres, busca genérico
+        if not any([codigo_base, tamaño, hoyos, acabado, tag_filtro, uso, stock_minimo, palabras_libres]):
             columnas = ["Descripción", "Modelo", "TAGS"] if es_merceria else ["Modelo", "Uso", "TAGS"]
             resultados = []
             for palabra in palabras[:4]:
