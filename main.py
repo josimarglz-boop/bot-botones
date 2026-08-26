@@ -17,56 +17,33 @@ def cargar_inventario_supabase(pregunta: str):
     try:
         pregunta_lower = pregunta.lower()
 
-        # Palabras vacías que no aportan a la búsqueda
         stopwords = ["hola", "buen", "dia", "tarde", "noche", "gracias", "ok", "disculpa",
                      "dame", "dime", "muestra", "muéstrame", "busco", "necesito", "quiero",
                      "quisiera", "favor", "tienes", "tengan", "cuenten", "hay", "algun", "alguna",
                      "opciones", "opcion", "con", "que", "del", "una", "para", "los", "las", "por",
-                     ]
+                     "boton", "botón", "modelo", "estilo", "tipo", "talla", "tamaño"]
         palabras = [p.strip().lower() for p in re.findall(r'\b\w+\b', pregunta)
                     if len(p) > 2 and p not in stopwords]
 
         if not palabras and not re.search(r'\d', pregunta):
             return []
 
-        # =============== EXTRAE TODOS LOS CRITERIOS DE LA PREGUNTA ===============
-
-        # 1. Código + sufijo
-        # Maneja: 5936-R, 5936-L, B5936-R, B555830-B (código pegado con tamaño)
-        codigo_sufijo = re.search(r'\b[Bb]?(\d{3,6})[-]([RLMBrlmb24]{1,2}|CR|cr)\b', pregunta)
+        # ===== INICIALIZA TODAS LAS VARIABLES PRIMERO =====
         codigo_base = None
         sufijo = None
+        tamaño = None
+        hoyos = None
+        acabado = None
+        tag_filtro = None
+        uso = None
+        stock_minimo = None
 
-        if codigo_sufijo:
-            codigo_raw = codigo_sufijo.group(1)
-            sufijo = codigo_sufijo.group(2).lower()
-            # Si el número tiene más de 4 dígitos, los últimos 2 podrían ser el tamaño
-            # Ej: "555830" → código "5558", tamaño "30"
-            if len(codigo_raw) > 4:
-                codigo_base = codigo_raw[:4]
-                if not tamaño_match:
-                    tamaño = codigo_raw[4:]  # extrae tamaño pegado
-            else:
-                codigo_base = codigo_raw
-        
-        # Sin sufijo: busca código solo (ej: 5936, B5936, B555830)
-        if not codigo_base:
-            codigo_solo = re.search(r'\b[Bb]?(\d{3,6})\b', pregunta)
-            if codigo_solo:
-                codigo_raw = codigo_solo.group(1)
-                if len(codigo_raw) > 4:
-                    codigo_base = codigo_raw[:4]
-                    if not tamaño_match:
-                        tamaño = codigo_raw[4:]
-                else:
-                    codigo_base = codigo_raw
-
-        # 2. Tamaño (ej: "tamaño 30", "talla 16", o número suelto después del código)
+        # ===== 1. TAMAÑO (va primero para evitar conflicto con código) =====
         tamaño_match = re.search(r'(?:talla|tamaño|linea|línea|en)\s*(\d+)', pregunta_lower)
         if tamaño_match:
             tamaño = tamaño_match.group(1)
-        elif not tamaño:
-            # Detecta número suelto que no sea el código (ej: "5936 en 20 rayado")
+        else:
+            # Detecta número suelto que coincida con tamaños válidos
             numeros = re.findall(r'\b(\d{2})\b', pregunta)
             tamaños_validos = ["12","14","16","18","20","24","28","30","36","40","45","54","60"]
             for n in numeros:
@@ -74,15 +51,37 @@ def cargar_inventario_supabase(pregunta: str):
                     tamaño = n
                     break
 
-        # 3. Hoyos (ej: "2 hoyos", "4 hoyos")
-        hoyos = None
+        # ===== 2. CÓDIGO + SUFIJO =====
+        codigo_sufijo = re.search(r'\b[Bb]?(\d{3,6})[-]([RLMBrlmb24]{1,2}|CR|cr)\b', pregunta)
+        if codigo_sufijo:
+            codigo_raw = codigo_sufijo.group(1)
+            sufijo = codigo_sufijo.group(2).lower()
+            if len(codigo_raw) > 4:
+                codigo_base = codigo_raw[:4]
+                if not tamaño:
+                    tamaño = codigo_raw[4:]
+            else:
+                codigo_base = codigo_raw
+
+        # Sin sufijo: busca código solo
+        if not codigo_base:
+            codigo_solo = re.search(r'\b[Bb]?(\d{3,6})\b', pregunta)
+            if codigo_solo:
+                codigo_raw = codigo_solo.group(1)
+                if len(codigo_raw) > 4:
+                    codigo_base = codigo_raw[:4]
+                    if not tamaño:
+                        tamaño = codigo_raw[4:]
+                else:
+                    codigo_base = codigo_raw
+
+        # ===== 3. HOYOS =====
         if re.search(r'2\s*hoyo|dos\s*hoyo', pregunta_lower):
             hoyos = "2 hoyos"
         elif re.search(r'4\s*hoyo|cuatro\s*hoyo', pregunta_lower):
             hoyos = "4 hoyos"
 
-        # 4. Acabado (ej: "mate", "brillante", sufijo -M, -B)
-        acabado = None
+        # ===== 4. ACABADO =====
         sufijo_acabado = {"m": "Mate", "b": "Brillante"}
         if sufijo in sufijo_acabado:
             acabado = sufijo_acabado[sufijo]
@@ -91,8 +90,7 @@ def cargar_inventario_supabase(pregunta: str):
         elif "brillante" in palabras:
             acabado = "Brillante"
 
-        # 5. TAGS por sufijo o palabra (rayado, liso)
-        tag_filtro = None
+        # ===== 5. TAG FILTRO (sufijos y palabras conocidas) =====
         if sufijo == "r" or "rayado" in palabras:
             tag_filtro = "rayado"
         elif sufijo == "l" or "liso" in palabras:
@@ -100,17 +98,15 @@ def cargar_inventario_supabase(pregunta: str):
         elif "teñible" in palabras or "teñir" in palabras:
             tag_filtro = "teñible"
 
-        # 6. Uso (ej: "camisero", "sastre", "fantasía")
-        uso = None
+        # ===== 6. USO =====
         if any(p in palabras for p in ["camisero", "camisa"]):
             uso = "Camisero"
         elif any(p in palabras for p in ["sastre", "pantalon", "pantalón", "saco"]):
             uso = "Sastre"
-        elif any(p in palabras for p in ["fantasia", "fantasía", "vintage", "decorativo"]):
+        elif any(p in palabras for p in ["fantasia", "fantasía", "decorativo"]):
             uso = "Fantasía"
 
-        # 7. Stock mínimo (mazos, gruesas, unidades)
-        stock_minimo = None
+        # ===== 7. STOCK MÍNIMO =====
         mazos_m = re.search(r'(\d+)\s*mazos?\b', pregunta_lower)
         gruesas_m = re.search(r'(\d+)\s*gruesas?\b', pregunta_lower)
         unidades_m = re.search(r'(\d{3,6})\s*(?:unidades|piezas|pzs)\b', pregunta_lower)
@@ -119,31 +115,26 @@ def cargar_inventario_supabase(pregunta: str):
             print(f"Stock mínimo: {mazos_m.group(1)} mazos = {stock_minimo} pzs")
         elif gruesas_m:
             stock_minimo = int(gruesas_m.group(1)) * 144
-            print(f"Stock mínimo: {gruesas_m.group(1)} gruesas = {stock_minimo} pzs")
         elif unidades_m:
             stock_minimo = int(unidades_m.group(1))
 
-        # 8. Detecta mercería vs botones
+        # ===== 8. MERCERÍA vs BOTONES =====
         palabras_merceria = ["cinta", "palmita", "resorte", "elastico", "elástico",
                              "plastiflecha", "candado", "fleco", "satinado", "hilo", "encaje"]
         es_merceria = any(p in palabras for p in palabras_merceria)
         tabla = "inventario_merceria" if es_merceria else "inventario_botones"
 
-        # =============== CONSTRUYE QUERY ENCADENADO EN SUPABASE ===============
+        # ===== 9. PALABRAS LIBRES → buscar en TAGS =====
+        # Palabras que no fueron usadas como criterio → posibles TAGS (ej: "Coco", "Concha", "vintage")
+        palabras_criterio = {"mate", "brillante", "rayado", "liso", "teñible", "teñir",
+                             "camisero", "camisa", "sastre", "saco", "fantasia", "fantasía",
+                             "decorativo", "vintage", "pantalon"} | set(palabras_merceria)
+        palabras_libres = [p for p in palabras
+                          if p not in palabras_criterio and not p.isdigit() and len(p) > 2]
+
+        # ===== CONSTRUYE QUERY ENCADENADO =====
         query = supabase.table(tabla).select("*")
 
-        # Palabras ya usadas como criterios específicos — no buscarlas de nuevo en TAGS
-        palabras_usadas = set()
-        if acabado: palabras_usadas.update(["mate", "brillante"])
-        if uso: palabras_usadas.update(["camisero", "camisa", "sastre", "pantalon", "saco", "fantasia", "fantasía", "vintage", "decorativo"])
-        if tag_filtro: palabras_usadas.update(["rayado", "liso", "teñible", "teñir"])
-
-        # Palabras libres = las que no son criterios conocidos → posibles TAGS (ej: "Coco", "Concha")
-        palabras_libres = [p for p in palabras if p not in palabras_usadas
-                          and p not in ["boton", "botón", "talla", "tamaño", "estilo", "tipo"]
-                          and not p.isdigit()]
-
-        # Aplica filtros en orden de especificidad
         if codigo_base:
             query = query.ilike("Modelo", f"%{codigo_base}%")
         if tamaño and not es_merceria:
@@ -158,13 +149,14 @@ def cargar_inventario_supabase(pregunta: str):
             query = query.eq("Uso", uso)
         if stock_minimo:
             query = query.gte("Stock", stock_minimo)
-
-        # Si hay palabras libres (ej: "Coco", "vintage", "Concha"), busca en TAGS
+        # Palabras libres → busca en TAGS (ej: "Coco", "Concha")
         if palabras_libres:
             query = query.ilike("TAGS", f"%{palabras_libres[0]}%")
 
-        # Si no hay ningún criterio específico ni palabras libres, busca genérico
-        if not any([codigo_base, tamaño, hoyos, acabado, tag_filtro, uso, stock_minimo, palabras_libres]):
+        hay_criterio = any([codigo_base, tamaño, hoyos, acabado, tag_filtro, uso, stock_minimo, palabras_libres])
+
+        # Sin criterios → búsqueda genérica en columnas
+        if not hay_criterio:
             columnas = ["Descripción", "Modelo", "TAGS"] if es_merceria else ["Modelo", "Uso", "TAGS"]
             resultados = []
             for palabra in palabras[:4]:
