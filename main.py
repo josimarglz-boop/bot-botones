@@ -207,7 +207,7 @@ Pregunta: "{pregunta}"
 Instrucciones:
 1. Saludo: Si saludan genérico → "¡Hola! Soy Botoncín 🧵 ¿Qué buscas?". Si piden producto → directo.
 2. Stock: Revisa columna 'Stock'. Si >0 → disponible. Si 0 → "No hay stock". Si inventario vacío → explica que no hay coincidencia exacta y sugiere alternativas si las hay.
-3. Unidades: Si piden mazos (1 mazo=1728 pzs) o gruesas (1 gruesa=144 pzs), calcula si hay suficiente.
+3. Unidades: Si piden piezas, mazos (1 mazo=1728 pzs) o gruesas (1 gruesa=144 pzs), calcula si hay suficiente.
 4. Sufijos botones: -R=Rayado, -L=Liso, -M=Mate, -B=Brillante, -2=2hoyos, -4=4hoyos, resáltalo.
 5. Sufijos mercería: -B=Blanco, -N=Negro, -M=Marino, -CR=Crudo, resáltalo.
 6. TAGS: Si incluyen "Teñible", "Básico", resáltalo.
