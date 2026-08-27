@@ -1,3 +1,4 @@
+
 import os
 import re
 from flask import Flask, request
@@ -124,11 +125,12 @@ def cargar_inventario_supabase(pregunta: str):
         es_merceria = any(p in palabras for p in palabras_merceria)
         tabla = "inventario_merceria" if es_merceria else "inventario_botones"
 
-        # ===== 9. PALABRAS LIBRES → buscar en TAGS =====
-        # Palabras que no fueron usadas como criterio → posibles TAGS (ej: "Coco", "Concha", "vintage")
+        # ===== 9. PALABRAS LIBRES → buscar en TAGS y Uso =====
+        # Cualquier palabra no reconocida como criterio → posible TAG (coco, cuerno, blusa, vintage...)
         palabras_criterio = {"mate", "brillante", "rayado", "liso", "teñible", "teñir",
                              "camisero", "camisa", "sastre", "saco", "fantasia", "fantasía",
-                             "decorativo", "vintage", "pantalon"} | set(palabras_merceria)
+                             "decorativo", "vintage", "pantalon", "mazos", "mazo", "gruesa",
+                             "gruesas", "piezas", "unidades"} | set(palabras_merceria)
         palabras_libres = [p for p in palabras
                           if p not in palabras_criterio and not p.isdigit() and len(p) > 2]
 
@@ -149,13 +151,16 @@ def cargar_inventario_supabase(pregunta: str):
             query = query.eq("Uso", uso)
         if stock_minimo:
             query = query.gte("Stock", stock_minimo)
-        # Palabras libres → busca en TAGS (ej: "Coco", "Concha")
+
+        # Palabras libres → busca en TAGS con la primera palabra
+        # Si hay más de una, filtramos las demás en Python después
         if palabras_libres:
             query = query.ilike("TAGS", f"%{palabras_libres[0]}%")
 
-        hay_criterio = any([codigo_base, tamaño, hoyos, acabado, tag_filtro, uso, stock_minimo, palabras_libres])
+        hay_criterio = any([codigo_base, tamaño, hoyos, acabado, tag_filtro, uso,
+                            stock_minimo, palabras_libres])
 
-        # Sin criterios → búsqueda genérica en columnas
+        # Sin criterios → búsqueda genérica en TAGS, Uso y Modelo
         if not hay_criterio:
             columnas = ["Descripción", "Modelo", "TAGS"] if es_merceria else ["Modelo", "Uso", "TAGS"]
             resultados = []
@@ -170,8 +175,17 @@ def cargar_inventario_supabase(pregunta: str):
             unicos = {r['id']: r for r in resultados}
             return list(unicos.values())[:6]
 
-        resultado = query.limit(6).execute()
-        return resultado.data if resultado.data else []
+        resultado = query.limit(20).execute()
+        data = resultado.data if resultado.data else []
+
+        # Filtra en Python las palabras libres adicionales (ej: "botón coco blusa")
+        if len(palabras_libres) > 1 and data:
+            for palabra_extra in palabras_libres[1:]:
+                data = [r for r in data
+                        if palabra_extra in r.get("TAGS", "").lower()
+                        or palabra_extra in r.get("Uso", "").lower()]
+
+        return data[:6]
 
     except Exception as e:
         print(f"Error en búsqueda: {e}")
