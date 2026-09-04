@@ -53,7 +53,8 @@ PALABRAS_CRITERIO = {
     "camisero","camisa","sastre","pantalon","fantasia","fantasía",
     "decorativo","pantalón","mazos","mazo","gruesa","gruesas",
     "piezas","unidades","imagen","foto","existencia","stock",
-    "llegada","cuando","cuándo",
+    "llegada","cuando","cuándo","fecha","llega","próxima",
+    "proxima","disponible","disponibles","cuantos","cuántos",
 }
 
 # Palabras de mercería (detectan tabla)
