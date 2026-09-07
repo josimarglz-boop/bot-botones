@@ -1,3 +1,4 @@
+
 import os
 import re
 from flask import Flask, request, jsonify
@@ -475,6 +476,11 @@ def webhook():
     """Recibe mensajes de WhatsApp vía Twilio."""
     mensaje_entrante = request.form.get("Body", "").strip()
 
+    # Modo mantenimiento
+    if os.environ.get("MANTENIMIENTO", "false").lower() == "true":
+        resp = MessagingResponse()
+        resp.message("🔧 Botoncín está en mantenimiento.\nEstaremos de vuelta pronto. ¡Gracias por tu paciencia! 😊")
+        return str(resp)
 
     inventario = cargar_inventario_supabase(mensaje_entrante)
     respuesta  = consultar_ia(mensaje_entrante, inventario)
