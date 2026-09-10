@@ -276,7 +276,7 @@ def buscar_botones(pregunta: str, pregunta_lower: str, palabras: list) -> list:
         for col in ["Modelo", "Uso", "TAGS"]:
             for p in palabras[:4]:
                 try:
-                    r = supabase.table("inventario_botones").select("*").ilike(col, f"%{p}%").limit(4).execute()
+                    r = supabase.table("inventario_botones").select("*").ilike(col, f"%{p}%").order("Stock_Mazos", desc=True).limit(4).execute()
                     if r.data:
                         resultados.extend(r.data)
                 except:
@@ -284,7 +284,7 @@ def buscar_botones(pregunta: str, pregunta_lower: str, palabras: list) -> list:
         unicos = {r["id"]: r for r in resultados}
         return list(unicos.values())[:6]
 
-    data = query.limit(20).execute().data or []
+    data = query.order("Stock_Mazos", desc=True).limit(20).execute().data or []
 
     # Filtro Python para palabras libres adicionales
     if len(palabras_libres) > 1 and data:
@@ -343,7 +343,7 @@ def buscar_merceria(pregunta: str, pregunta_lower: str, palabras: list) -> list:
         for col in ["Descripción", "Modelo", "TAGS", "Color", "Medida"]:
             for p in palabras[:4]:
                 try:
-                    r = supabase.table("inventario_merceria").select("*").ilike(col, f"%{p}%").limit(4).execute()
+                    r = supabase.table("inventario_merceria").select("*").ilike(col, f"%{p}%").order("Stock", desc=True).limit(4).execute()
                     if r.data:
                         resultados.extend(r.data)
                 except:
@@ -351,7 +351,7 @@ def buscar_merceria(pregunta: str, pregunta_lower: str, palabras: list) -> list:
         unicos = {r["id"]: r for r in resultados}
         return list(unicos.values())[:6]
 
-    data = query.limit(6).execute().data or []
+    data = query.order("Stock", desc=True).limit(6).execute().data or []
     return data
 
 
