@@ -48,6 +48,7 @@ STOPWORDS = {
     "opciones","opcion","con","que","del","una","para","los","las","por",
     "boton","botón","modelo","estilo","tipo","talla","tamaño","cual","cuales",
     "del","sobre","sus","disponibles","disponible","actualmente","ahora",
+    "botones","modelos","color","colores","tono","tonos","tienen","tiene","este","esta",
 }
 
 # Palabras que ya son criterios estructurados (no buscar en TAGS)
@@ -56,6 +57,7 @@ PALABRAS_CRITERIO = {
     "camisero","camisa","sastre","pantalon","fantasia","fantasía",
     "decorativo","pantalón","mazos","mazo","gruesa","gruesas",
     "piezas","unidades","imagen","foto","existencia","stock",
+    "fotos","imagenes","imágenes","fotografia","fotografía","picture","manda","mandame","envia","enviame",
     "llegada","cuando","cuándo","fecha","llega","próxima",
     "proxima","disponible","disponibles","cuantos","cuántos",
 }
@@ -66,6 +68,42 @@ PALABRAS_MERCERIA = {
     "candado","fleco","satinado","bolsas","contactel","crochet","crochet","hilo",
     "encaje","velcro","sesgo","ribete","pretina","broches","broche","cierre",
 }
+
+# Tonos / colores: lo que escribe el vendedor → valor en columna Tono (o Color en mercería)
+# Las frases de varias palabras van primero para que "oro rosa" no se lea como "oro".
+TONOS = [
+    ("tono fabrica", "Tono Fábrica"), ("tono fábrica", "Tono Fábrica"),
+    ("oro rosa", "Oro Rosa"), ("oro viejo", "Oro Viejo"), ("plata vieja", "Plata Vieja"),
+    ("gris oxford", "Gris Oxford"), ("niquel mate", "Níquel Mate"), ("níquel mate", "Níquel Mate"),
+    ("blanco", "Blanco"), ("blancos", "Blanco"), ("blanca", "Blanco"), ("blancas", "Blanco"),
+    ("negro", "Negro"), ("negros", "Negro"), ("negra", "Negro"), ("negras", "Negro"),
+    ("dorada", "Dorado"), ("doradas", "Dorado"), ("plateado", "Plata Vieja"), ("plateada", "Plata Vieja"),
+    ("marino", "Marino"), ("azul", "Azul"), ("beige", "Beige"), ("cafe", "Café"), ("café", "Café"),
+    ("cobre", "Cobre"), ("dorado", "Dorado"), ("dorados", "Dorado"), ("oro", "Dorado"),
+    ("gris", "Gris"), ("hueso", "Hueso"), ("humo", "Humo"), ("laton", "Latón"), ("latón", "Latón"),
+    ("lila", "Lila"), ("metalico", "Metálico"), ("metálico", "Metálico"), ("militar", "Militar"),
+    ("niquel", "Níquel"), ("níquel", "Níquel"), ("olivo", "Olivo"), ("transparente", "Transparente"),
+    ("verde", "Verde"), ("ambar", "Ámbar"), ("ámbar", "Ámbar"), ("arena", "Arena"),
+    ("holografico", "Holográfico"), ("holográfico", "Holográfico"), ("crudo", "Crudo"),
+    ("plata", "Plata Vieja"),
+    # Colores que hoy no hay en inventario: se reconocen para avisar qué tonos SÍ hay
+    ("rojo", "Rojo"), ("roja", "Rojo"), ("rosa", "Rosa"), ("amarillo", "Amarillo"),
+    ("morado", "Morado"), ("naranja", "Naranja"), ("vino", "Vino"), ("guinda", "Guinda"),
+    ("turquesa", "Turquesa"), ("rey", "Azul Rey"), ("celeste", "Celeste"), ("mostaza", "Mostaza"),
+]
+
+
+def detectar_tono(pregunta_lower: str):
+    """Regresa (tono, palabras_que_uso) o (None, set())."""
+    for frase, tono in TONOS:
+        if re.search(rf"\b{frase}\b", pregunta_lower):
+            return tono, set(frase.split())
+    return None, set()
+
+
+def patron_sin_acentos(texto: str) -> str:
+    """'Níquel' → 'N_quel': el _ de SQL acepta cualquier letra, así encuentra Níquel y Niquel."""
+    return re.sub(r"[áéíóúÁÉÍÓÚñÑ]", "_", texto)
 
 
 # ===========================================================
@@ -165,7 +203,8 @@ def buscar_botones(pregunta: str, pregunta_lower: str, palabras: list) -> list:
 
     # --- Tamaño por palabras si no viene en SKU ---
     if not tamaño:
-        m = re.search(r'(?:talla|tamaño|linea|línea|en)\s*(\d{2})', pregunta_lower)
+        # \b evita que "imagEN 8317" se lea como "en 83"
+        m = re.search(r'\b(?:talla|tamaño|linea|línea|en)\s*(\d{2})\b', pregunta_lower)
         if m:
             tamaño = m.group(1)
         else:
@@ -180,14 +219,21 @@ def buscar_botones(pregunta: str, pregunta_lower: str, palabras: list) -> list:
         hoyos = "2 hoyos"
     elif re.search(r'4\s*hoyo|cuatro\s*hoyo', pregunta_lower):
         hoyos = "4 hoyos"
+    elif re.search(r'\bpata\b', pregunta_lower):
+        hoyos = "De Pata"
     # Sufijo de hoyos
     if sufijo in ("2", "4") and not hoyos:
         hoyos = f"{sufijo} hoyos"
         sufijo = None
 
+    # --- Tono / color ---
+    tono, palabras_tono = detectar_tono(pregunta_lower)
+
     # --- Acabado ---
     acabado = None
-    if sufijo in ("m", "b"):
+    if "mate" in palabras_tono:
+        pass  # "níquel mate" es un tono, no el acabado
+    elif sufijo in ("m", "b"):
         acabado = SUFIJOS_BOTONES[sufijo][1]
     elif "mate" in palabras:
         acabado = "Mate"
@@ -236,41 +282,63 @@ def buscar_botones(pregunta: str, pregunta_lower: str, palabras: list) -> list:
         palabras_usadas.update(["mate", "brillante"])
     if uso:
         palabras_usadas.update(["camisero","camisa","sastre","pantalon","saco","fantasia","fantasía"])
+    palabras_usadas.update(palabras_tono)
+    palabras_usadas.update(["hoyo", "hoyos", "dos", "cuatro", "pata"])
+    # Fuera cualquier palabra con números (B010324, 2218, 4hoyos): son códigos, no TAGS
     palabras_libres = [p for p in palabras
-                       if p not in palabras_usadas and not p.isdigit() and len(p) > 2]
+                       if p not in palabras_usadas and not re.search(r'\d', p) and len(p) > 2]
 
     # --- Construir query ---
     # El modelo en Supabase es el SKU completo: B221814
     # Buscamos con ilike para que "2218" encuentre B221814, B221816, etc.
-    query = supabase.table("inventario_botones").select("*")
+    def ejecutar(con_tono: bool) -> list:
+        query = supabase.table("inventario_botones").select("*")
 
-    if modelo and tamaño:
-        # Busca modelo+tamaño exactos: B221814
-        query = query.ilike("Modelo", f"%{modelo}{tamaño}%")
-    elif modelo:
-        # Solo modelo: trae todas las tallas del modelo
-        query = query.ilike("Modelo", f"%{modelo}%")
+        if modelo and tamaño:
+            # Busca modelo+tamaño exactos: B221814
+            query = query.ilike("Modelo", f"B{modelo}{tamaño}%")
+        elif modelo:
+            # Solo modelo: trae todas las tallas del modelo
+            query = query.ilike("Modelo", f"B{modelo}%")   # empieza con B2218, no B732218
 
-    # Sufijo en el modelo (ej: -L, -SPL, -ANCLA)
-    if sufijo and sufijo not in ("m", "b", "r", "l", "2", "4"):
-        # Sufijo especial → buscar en nombre del modelo directamente
-        query = query.ilike("Modelo", f"%-{sufijo.upper()}%")
+        # Sufijo en el modelo (ej: -L, -SPL, -ANCLA)
+        if sufijo and sufijo not in ("m", "b", "r", "l", "2", "4"):
+            # Sufijo especial → buscar en nombre del modelo directamente
+            query = query.ilike("Modelo", f"%-{sufijo.upper()}%")
 
-    # ilike en vez de eq: tolera mayúsculas ("4 Hoyos") y espacios sobrantes ("Mate ")
-    if hoyos:
-        query = query.ilike("Hoyos", f"%{hoyos[:6]}%")       # "4 hoyo" → 4 hoyos / 4 Hoyos
-    if acabado:
-        query = query.ilike("Acabado", f"%{acabado}%")
-    if tag_filtro:
-        query = query.ilike("TAGS", f"%{tag_filtro}%")
-    if uso:
-        query = query.ilike("Uso", f"%{uso[:5]}%")           # "Camis" → Camisero / Camisas
-    if stock_minimo_mazos:
-        query = query.gte("Stock_Mazos", stock_minimo_mazos)
-    if palabras_libres:
-        query = query.ilike("TAGS", f"%{palabras_libres[0]}%")
+        # ilike en vez de eq: tolera mayúsculas ("4 Hoyos") y espacios sobrantes ("Mate ")
+        if hoyos:
+            query = query.ilike("Hoyos", f"%{hoyos[:6]}%")       # "4 hoyo" → 4 hoyos / 4 Hoyos
+        if acabado:
+            query = query.ilike("Acabado", f"%{acabado}%")
+        if tag_filtro:
+            query = query.ilike("TAGS", f"%{tag_filtro}%")
+        if uso:
+            query = query.ilike("Uso", f"%{uso[:5]}%")           # "Camis" → Camisero / Camisas
+        if tono and con_tono:
+            query = query.ilike("Tono", f"%{patron_sin_acentos(tono)}%")
+        if stock_minimo_mazos:
+            query = query.gte("Stock_Mazos", stock_minimo_mazos)
+        if palabras_libres:
+            query = query.ilike("TAGS", f"%{palabras_libres[0]}%")
 
-    hay_criterio = any([modelo, tamaño, hoyos, acabado, tag_filtro, uso,
+        data = query.order("Stock_Mazos", desc=True).limit(150).execute().data or []
+
+        # Tamaño sin modelo ("plata vieja 18"): filtra por la columna Tamaño
+        if tamaño and not modelo:
+            def _tam(r):
+                try:
+                    return float(r.get("Tamaño")) == float(tamaño)
+                except (TypeError, ValueError):
+                    return False
+            data = [r for r in data if _tam(r)]
+
+        # Filtro Python para palabras libres adicionales
+        for extra in palabras_libres[1:]:
+            data = [r for r in data if extra in (r.get("TAGS") or "").lower()]
+        return data
+
+    hay_criterio = any([modelo, tamaño, hoyos, acabado, tag_filtro, uso, tono,
                         stock_minimo_mazos, palabras_libres])
 
     # Sin criterios → búsqueda genérica en TAGS, Uso y Modelo
@@ -285,16 +353,21 @@ def buscar_botones(pregunta: str, pregunta_lower: str, palabras: list) -> list:
                 except:
                     pass
         unicos = {r["id"]: r for r in resultados}
-        return list(unicos.values())[:6]
+        return list(unicos.values())[:6], ""
 
-    data = query.order("Stock_Mazos", desc=True).limit(20).execute().data or []
+    data = ejecutar(con_tono=True)
 
-    # Filtro Python para palabras libres adicionales
-    if len(palabras_libres) > 1 and data:
-        for extra in palabras_libres[1:]:
-            data = [r for r in data if extra in (r.get("TAGS") or "").lower()]
+    # Pidieron un tono que ese modelo no tiene → mostrar los tonos que sí hay
+    if not data and tono and modelo:
+        alternativas = ejecutar(con_tono=False)
+        if alternativas:
+            tonos_hay = sorted({(r.get("Tono") or "").strip() for r in alternativas} - {""})
+            nota = (f"El modelo B{modelo}{tamaño or ''} NO existe en tono {tono}. "
+                    f"Tonos disponibles: {', '.join(tonos_hay) or 'sin tono registrado'}. "
+                    f"Avísalo primero y luego muestra estas opciones.")
+            return alternativas[:6], nota
 
-    return data[:6]
+    return data[:6], ""
 
 
 def buscar_merceria(pregunta: str, pregunta_lower: str, palabras: list) -> list:
@@ -305,8 +378,13 @@ def buscar_merceria(pregunta: str, pregunta_lower: str, palabras: list) -> list:
     base = sku["base"]
     sufijo = sku["sufijo"]
 
-    # Color del sufijo
+    # Color del sufijo, o por palabra ("palmita negra", "contactel blanco")
     color = SUFIJOS_MERCERIA.get(sufijo) if sufijo else None
+    if not color:
+        color, _ = detectar_tono(pregunta_lower)
+
+    # Tipo de producto por palabra ("palmita", "elástico") → filtra Descripción
+    producto = next((p for p in palabras if p in PALABRAS_MERCERIA), None)
 
     # --- Medida (ej: "7mm", "20 mm") ---
     medida = None
@@ -332,13 +410,16 @@ def buscar_merceria(pregunta: str, pregunta_lower: str, palabras: list) -> list:
     if base:
         query = query.ilike("Modelo", f"%{base}%")
     if color:
-        query = query.ilike("Color", f"%{color}%")
+        query = query.ilike("Color", f"%{patron_sin_acentos(color)}%")
+    if producto and not base:
+        # vocales → _ para que "elastico" encuentre "Elástico"
+        query = query.ilike("Descripción", f"%{re.sub(r'[aeiouáéíóú]', '_', producto)}%")
     if medida:
         query = query.ilike("Medida", f"%{medida}%")
     if stock_minimo:
         query = query.gte("Stock", stock_minimo)
 
-    hay_criterio = any([base, color, medida, stock_minimo])
+    hay_criterio = any([base, color, producto, medida, stock_minimo])
 
     # Sin criterios → búsqueda inversa por Descripción, TAGS, Color
     if not hay_criterio:
@@ -352,18 +433,21 @@ def buscar_merceria(pregunta: str, pregunta_lower: str, palabras: list) -> list:
                 except:
                     pass
         unicos = {r["id"]: r for r in resultados}
-        return list(unicos.values())[:6]
+        return list(unicos.values())[:6], ""
 
     data = query.order("Stock", desc=True).limit(6).execute().data or []
-    return data
+    return data, ""
 
 
 # ===========================================================
 # FUNCIÓN PRINCIPAL DE BÚSQUEDA
 # ===========================================================
 
-def cargar_inventario_supabase(pregunta: str) -> list:
-    """Orquesta la búsqueda en botones o mercería según la pregunta."""
+def cargar_inventario_supabase(pregunta: str) -> tuple:
+    """
+    Orquesta la búsqueda en botones o mercería según la pregunta.
+    Regresa (resultados, nota). La nota es contexto extra para la IA (puede ir vacía).
+    """
     try:
         pregunta_lower = pregunta.lower()
 
@@ -372,7 +456,7 @@ def cargar_inventario_supabase(pregunta: str) -> list:
                     if len(p) > 2 and p.lower() not in STOPWORDS]
 
         if not palabras and not re.search(r'\d', pregunta):
-            return []
+            return [], ""
 
         # ¿Es mercería o botón?
         es_merceria = (
@@ -388,7 +472,7 @@ def cargar_inventario_supabase(pregunta: str) -> list:
 
     except Exception as e:
         print(f"Error general en búsqueda: {e}")
-        return []
+        return [], ""
 
 
 # ===========================================================
@@ -417,7 +501,57 @@ def limpiar_registro(registro: dict) -> dict:
     return limpio
 
 
-def consultar_ia(pregunta: str, inventario: list) -> str:
+MAX_FOTOS = 3   # máximo de fotos por respuesta (cada foto es un mensaje que Twilio cobra)
+
+
+def pide_imagen(pregunta: str) -> bool:
+    return bool(re.search(r'\b(imagen|imagenes|imágenes|foto|fotos|fotografia|fotografía|picture)\b',
+                          pregunta.lower()))
+
+
+def url_imagen_directa(url: str):
+    """
+    Convierte links de Google Drive al formato directo que WhatsApp sí puede descargar.
+    drive.google.com/uc?export=view&id=XXX  → lh3.googleusercontent.com/d/XXX
+    drive.google.com/file/d/XXX/view        → lh3.googleusercontent.com/d/XXX
+    """
+    if not url or not isinstance(url, str):
+        return None
+    url = url.strip()
+    m = re.search(r'[?&]id=([A-Za-z0-9_-]{10,})', url) or re.search(r'/d/([A-Za-z0-9_-]{10,})', url)
+    if m and ("drive.google.com" in url or "googleusercontent.com" in url):
+        return f"https://lh3.googleusercontent.com/d/{m.group(1)}"
+    return url if url.startswith("http") else None
+
+
+def juntar_fotos(inventario: list) -> list:
+    """
+    Regresa [(url, "B831720, B831724"), ...] sin repetir la misma foto.
+    Varios tamaños suelen compartir foto: se manda una sola vez con todos los modelos.
+    """
+    fotos = {}   # url → {"modelos": [...], "tonos": [...]}
+    for r in inventario:
+        url = url_imagen_directa(r.get("Imagen"))
+        if not url:
+            continue
+        f = fotos.setdefault(url, {"modelos": [], "tonos": []})
+        modelo = str(r.get("Modelo", "")).strip()
+        tono = str(r.get("Tono") or "").strip()
+        if modelo and modelo not in f["modelos"]:
+            f["modelos"].append(modelo)
+        if tono and tono not in f["tonos"]:
+            f["tonos"].append(tono)
+
+    salida = []
+    for url, f in list(fotos.items())[:MAX_FOTOS]:
+        pie = ", ".join(f["modelos"])
+        if f["tonos"]:
+            pie += " · " + " / ".join(f["tonos"])   # "B601918, B601916 · Tono Fábrica"
+        salida.append((url, pie))
+    return salida
+
+
+def consultar_ia(pregunta: str, inventario: list, nota: str = "") -> str:
     """Envía datos filtrados a Haiku y retorna respuesta formateada."""
 
     inventario = [limpiar_registro(r) for r in inventario]
@@ -426,14 +560,18 @@ def consultar_ia(pregunta: str, inventario: list) -> str:
 
     # Detectar intención para dar contexto extra al prompt
     es_fecha     = any(w in pregunta_lower for w in ["cuando","cuándo","llegada","llega","fecha"])
-    es_imagen    = any(w in pregunta_lower for w in ["imagen","foto","picture"])
+    es_imagen    = pide_imagen(pregunta)
     es_existencia= any(w in pregunta_lower for w in ["existencia","stock","cuántos","cuantos","disponible"])
 
     intencion = ""
     if es_fecha:
         intencion = "El usuario pregunta por FECHA DE LLEGADA. Muestra el campo 'fecha_llegada'. Si es null, di que no hay fecha confirmada."
     elif es_imagen:
-        intencion = "El usuario pide la IMAGEN. Muestra solo el primer resultado con su link de imagen."
+        intencion = ("El usuario pide la IMAGEN. Las fotos se envían aparte como imagen de WhatsApp, "
+                     "así que NO escribas la línea 🖼 Imagen ni ningún link. Muestra TODOS los resultados con su ficha. "
+                     "Si al menos uno trae Imagen, termina con: '📷 Te mando la foto enseguida.' "
+                     "Si NINGÚN resultado trae Imagen, termina con: '📷 Este modelo aún no tiene imagen cargada.' "
+                     "Nunca digas que no encontraste el modelo si hay resultados.")
     elif es_existencia:
         intencion = "El usuario pregunta por EXISTENCIA/STOCK. Muestra claramente cuántos mazos o unidades hay disponibles."
 
@@ -445,6 +583,7 @@ INVENTARIO DISPONIBLE:
 
 PREGUNTA: "{pregunta}"
 {f'INTENCIÓN DETECTADA: {intencion}' if intencion else ''}
+{f'NOTA IMPORTANTE: {nota}' if nota else ''}
 
 REGLAS:
 1. Saludo genérico → "¡Hola! Soy Botoncín 🧵 ¿Qué buscas?"
@@ -506,11 +645,18 @@ def webhook():
     """Recibe mensajes de WhatsApp vía Twilio."""
     mensaje_entrante = request.form.get("Body", "").strip()
 
-    inventario = cargar_inventario_supabase(mensaje_entrante)
-    respuesta  = consultar_ia(mensaje_entrante, inventario)
+    inventario, nota = cargar_inventario_supabase(mensaje_entrante)
+    respuesta  = consultar_ia(mensaje_entrante, inventario, nota)
 
     resp = MessagingResponse()
     resp.message(respuesta)
+
+    # Si pidieron imagen/foto: cada foto va en su propio mensaje, con los modelos como pie de foto
+    if pide_imagen(mensaje_entrante):
+        for url, modelos in juntar_fotos(inventario):
+            foto = resp.message(f"📷 {modelos}")
+            foto.media(url)
+
     return str(resp)
 
 
@@ -523,8 +669,11 @@ def health():
 def test_busqueda():
     """Prueba la búsqueda sin llamar a la IA (ahorra créditos)."""
     pregunta   = request.args.get("q", "")
-    resultados = cargar_inventario_supabase(pregunta)
-    return jsonify({"pregunta": pregunta, "total": len(resultados), "resultados": resultados})
+    resultados, nota = cargar_inventario_supabase(pregunta)
+    fotos = juntar_fotos(resultados) if pide_imagen(pregunta) else []
+    return jsonify({"pregunta": pregunta, "total": len(resultados), "nota": nota,
+                    "fotos": [{"url": u, "modelos": m} for u, m in fotos],
+                    "resultados": resultados})
 
 
 if __name__ == "__main__":
