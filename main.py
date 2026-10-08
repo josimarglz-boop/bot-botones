@@ -1,6 +1,8 @@
 
+
 import os
 import re
+import json
 from flask import Flask, request, jsonify
 from twilio.twiml.messaging_response import MessagingResponse
 from anthropic import Anthropic
@@ -254,14 +256,15 @@ def buscar_botones(pregunta: str, pregunta_lower: str, palabras: list) -> list:
         # Sufijo especial → buscar en nombre del modelo directamente
         query = query.ilike("Modelo", f"%-{sufijo.upper()}%")
 
+    # ilike en vez de eq: tolera mayúsculas ("4 Hoyos") y espacios sobrantes ("Mate ")
     if hoyos:
-        query = query.eq("Hoyos", hoyos)
+        query = query.ilike("Hoyos", f"%{hoyos[:6]}%")       # "4 hoyo" → 4 hoyos / 4 Hoyos
     if acabado:
-        query = query.eq("Acabado", acabado)
+        query = query.ilike("Acabado", f"%{acabado}%")
     if tag_filtro:
         query = query.ilike("TAGS", f"%{tag_filtro}%")
     if uso:
-        query = query.eq("Uso", uso)
+        query = query.ilike("Uso", f"%{uso[:5]}%")           # "Camis" → Camisero / Camisas
     if stock_minimo_mazos:
         query = query.gte("Stock_Mazos", stock_minimo_mazos)
     if palabras_libres:
@@ -392,10 +395,33 @@ def cargar_inventario_supabase(pregunta: str) -> list:
 # PROMPT DE IA
 # ===========================================================
 
+def limpiar_registro(registro: dict) -> dict:
+    """
+    Quita los campos vacíos de un registro para que la IA no los muestre.
+    - Elimina None, "", espacios, "nan", "null"
+    - Elimina 'id' (no le sirve al agente)
+    - Conserva el 0 (Stock en 0 SÍ es información)
+    - Convierte 24.0 → 24
+    """
+    limpio = {}
+    for campo, valor in registro.items():
+        if campo == "id" or valor is None:
+            continue
+        if isinstance(valor, str):
+            valor = valor.strip()
+            if valor == "" or valor.lower() in ("nan", "null", "none"):
+                continue
+        if isinstance(valor, float) and valor.is_integer():
+            valor = int(valor)
+        limpio[campo] = valor
+    return limpio
+
+
 def consultar_ia(pregunta: str, inventario: list) -> str:
     """Envía datos filtrados a Haiku y retorna respuesta formateada."""
 
-    inv_str = str(inventario) if inventario else "[]"
+    inventario = [limpiar_registro(r) for r in inventario]
+    inv_str = json.dumps(inventario, ensure_ascii=False) if inventario else "[]"
     pregunta_lower = pregunta.lower()
 
     # Detectar intención para dar contexto extra al prompt
@@ -430,30 +456,34 @@ REGLAS:
 5. STOCK MERCERÍA: columna 'Stock' en piezas/rollos/metros.
 6. Si Stock_Mazos = 0 o Stock = 0 → "Sin stock" y muestra fecha_llegada si existe.
 7. Usa SOLO los campos presentes en los datos (no inventes).
+8. CAMPOS VACÍOS: si un campo NO viene en el registro, OMITE esa línea completa.
+   No escribas "N/A", "Sin dato", "Sin imagen", "Sin fecha" ni dejes la etiqueta vacía.
+   Ejemplo: si un botón no trae 'Hoyos', no pongas la línea ⚪ Hoyos.
 
-FORMATO BOTÓN (tiene Tamaño/Hoyos/Acabado):
+FORMATO BOTÓN (cada línea solo si el campo existe):
 *Opción N:*
-🔷 Modelo: [modelo]
-📏 Tamaño: [tamaño]
-⚪ Hoyos: [hoyos]
-✨ Acabado: [acabado]
-🎨 Tono: [tono]
-👔 Uso: [uso]
-🏷 Tags: [tags]
-📦 Stock: [stock] mazos
-🚚 Llegada: [fecha_llegada o "Sin fecha confirmada"]
-🖼 Imagen: [link o "Sin imagen"]
+🔷 Modelo: [Modelo]
+📏 Tamaño: [Tamaño]
+⚪ Hoyos: [Hoyos]
+✨ Acabado: [Acabado]
+🎨 Tono: [Tono]
+👔 Uso: [Uso]
+🏷 Tags: [TAGS]
+📦 Stock: [Stock_Mazos] mazos
+🚚 Llegada: [fecha_llegada]
+🖼 Imagen: [Imagen]
 
-FORMATO MERCERÍA (tiene Descripción/Medida/Color):
+FORMATO MERCERÍA (cada línea solo si el campo existe):
 *Opción N:*
-🔷 Modelo: [modelo]
-📝 Descripción: [descripción]
-📐 Medida: [medida]
-🎨 Color: [color]
-🏷 Tags: [tags]
-📦 Stock: [stock]
-🚚 Llegada: [fecha_llegada o "Sin fecha confirmada"]
-🖼 Imagen: [link o "Sin imagen"]
+🔷 Modelo: [Modelo]
+📝 Descripción: [Descripción]
+📐 Medida: [Medida]
+🎨 Color: [Color]
+📦 Presentación: [Presentación]
+🏷 Tags: [TAGS]
+📦 Stock: [Stock]
+🚚 Llegada: [fecha_llegada]
+🖼 Imagen: [Imagen]
 
 Separa opciones con línea en blanco. Numera si hay varias.
 """
