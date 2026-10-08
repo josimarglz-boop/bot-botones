@@ -1,4 +1,5 @@
 
+
 import os
 import re
 import json
@@ -37,7 +38,8 @@ SUFIJOS_MERCERIA = {
 }
 
 # Tamaños válidos de botones (líneas)
-TAMAÑOS_VALIDOS = {"12","14","16","18","20","24","28","30","36","40","45","54","60"}
+TAMAÑOS_VALIDOS = {"12","14","16","18","20","24","25","26","28","30","32","34","35","36",
+                   "40","44","45","48","54","60"}
 
 # Palabras que indican intención de búsqueda (no son criterios)
 STOPWORDS = {
@@ -191,12 +193,16 @@ def buscar_botones(pregunta: str, pregunta_lower: str, palabras: list) -> list:
 
     # --- Tamaño por palabras si no viene en SKU ---
     if not tamaño:
+        # Quitar cantidades ("30 mazos", "50 gruesas", "1728 piezas") para no leerlas como tamaño
+        texto_tam = re.sub(
+            r'\b\d+(?:[.,]\d+)?\s*(?:mazos?|gruesas?|piezas?|pzs?|unidades|rollos?|metros?|mts?)\b',
+            ' ', pregunta_lower)
         # \b evita que "imagEN 8317" se lea como "en 83"
-        m = re.search(r'\b(?:talla|tamaño|linea|línea|en)\s*(\d{2})\b', pregunta_lower)
+        m = re.search(r'\b(?:talla|tamaño|linea|línea|en)\s*(\d{2})\b', texto_tam)
         if m:
             tamaño = m.group(1)
         else:
-            for n in re.findall(r'\b(\d{2})\b', pregunta):
+            for n in re.findall(r'\b(\d{2})\b', texto_tam):
                 if n in TAMAÑOS_VALIDOS:
                     tamaño = n
                     break
@@ -279,12 +285,13 @@ def buscar_botones(pregunta: str, pregunta_lower: str, palabras: list) -> list:
     # --- Construir query ---
     # El modelo en Supabase es el SKU completo: B221814
     # Buscamos con ilike para que "2218" encuentre B221814, B221816, etc.
-    def ejecutar(con_tono: bool) -> list:
+    def ejecutar(con_tono: bool, con_stock: bool = True, con_tamaño: bool = True) -> list:
+        tam = tamaño if con_tamaño else None
         query = supabase.table("inventario_botones").select("*")
 
-        if modelo and tamaño:
+        if modelo and tam:
             # Busca modelo+tamaño exactos: B221814
-            query = query.ilike("Modelo", f"B{modelo}{tamaño}%")
+            query = query.ilike("Modelo", f"B{modelo}{tam}%")
         elif modelo:
             # Solo modelo: trae todas las tallas del modelo
             query = query.ilike("Modelo", f"B{modelo}%")   # empieza con B2218, no B732218
@@ -305,25 +312,27 @@ def buscar_botones(pregunta: str, pregunta_lower: str, palabras: list) -> list:
             query = query.ilike("Uso", f"%{uso[:5]}%")           # "Camis" → Camisero / Camisas
         if tono and con_tono:
             query = query.ilike("Tono", f"%{patron_sin_acentos(tono)}%")
-        if stock_minimo_mazos:
+        if stock_minimo_mazos and con_stock:
             query = query.gte("Stock_Mazos", stock_minimo_mazos)
         if palabras_libres:
             query = query.ilike("TAGS", f"%{palabras_libres[0]}%")
 
-        data = query.order("Stock_Mazos", desc=True).limit(150).execute().data or []
+        # Si hay que filtrar tamaño o palabras en Python, traer más filas para no perder opciones
+        limite = 1000 if ((tam and not modelo) or len(palabras_libres) > 1 or not con_tamaño) else 150
+        data = query.order("Stock_Mazos", desc=True).limit(limite).execute().data or []
 
         # Solo modelo ("1523"): preferir B1523xx sobre B15238xx (otro modelo de 5 dígitos)
-        if modelo and not tamaño:
+        if modelo and not tam:
             exactos = [r for r in data
                        if re.match(rf"^B{modelo}\d{{2}}(-|$)", str(r.get("Modelo", "")), re.I)]
             if exactos:
                 data = exactos
 
         # Tamaño sin modelo ("plata vieja 18"): filtra por la columna Tamaño
-        if tamaño and not modelo:
+        if tam and not modelo:
             def _tam(r):
                 try:
-                    return float(r.get("Tamaño")) == float(tamaño)
+                    return float(r.get("Tamaño")) == float(tam)
                 except (TypeError, ValueError):
                     return False
             data = [r for r in data if _tam(r)]
@@ -360,6 +369,26 @@ def buscar_botones(pregunta: str, pregunta_lower: str, palabras: list) -> list:
             return exacto, ""
 
     data = ejecutar(con_tono=True)
+
+    # No hay en ese tamaño → mostrar qué tamaños sí hay con esas características
+    if not data and tamaño:
+        otros = ejecutar(con_tono=True, con_tamaño=False)
+        if otros:
+            tams = sorted({int(float(r["Tamaño"])) for r in otros
+                           if str(r.get("Tamaño") or "").replace(".", "", 1).isdigit()})
+            nota = (f"NO hay opciones en tamaño {tamaño} con esas características. "
+                    f"Tamaños que sí hay: {', '.join(map(str, tams))}. "
+                    f"Avísalo primero y luego muestra estas opciones de otros tamaños.")
+            return otros[:6], nota
+
+    # Ninguno alcanza la cantidad pedida → mostrar los que sí hay, avisando cuánto tienen
+    if not data and stock_minimo_mazos:
+        sin_minimo = ejecutar(con_tono=True, con_stock=False)
+        if sin_minimo:
+            maximo = max((r.get("Stock_Mazos") or 0) for r in sin_minimo)
+            nota = (f"Pidieron {stock_minimo_mazos:g} mazos y NINGUNA opción alcanza esa cantidad "
+                    f"(la que más tiene: {maximo:g} mazos). Avísalo primero y luego muestra estas opciones.")
+            return sin_minimo[:6], nota
 
     # Pidieron un tono que ese modelo no tiene → mostrar los tonos que sí hay
     if not data and tono and modelo:
