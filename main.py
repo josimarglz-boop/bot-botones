@@ -1,5 +1,4 @@
 
-
 import os
 import re
 import json
@@ -101,6 +100,13 @@ def detectar_tono(pregunta_lower: str):
     return None, set()
 
 
+def sin_acentos(texto: str) -> str:
+    """'Elástico' → 'elastico' (para comparar en Python)."""
+    import unicodedata
+    t = unicodedata.normalize("NFD", str(texto).lower())
+    return "".join(c for c in t if unicodedata.category(c) != "Mn")
+
+
 def patron_sin_acentos(texto: str) -> str:
     """'Níquel' → 'N_quel': el _ de SQL acepta cualquier letra, así encuentra Níquel y Niquel."""
     return re.sub(r"[áéíóúÁÉÍÓÚñÑ]", "_", texto)
@@ -112,54 +118,36 @@ def patron_sin_acentos(texto: str) -> str:
 
 def parsear_sku_boton(texto: str) -> dict:
     """
-    Parsea cualquier formato de SKU de botón.
-    Formato real en Supabase: B + 4 dígitos (modelo) + 2 dígitos (tamaño) = 6 dígitos
-    
-    Ejemplos:
-    - B221814-L  → modelo=2218, tamaño=14, sufijo=l
-    - B221814    → modelo=2218, tamaño=14
-    - B2218      → modelo=2218 (sin tamaño)
-    - 2218       → modelo=2218
-    - 221814     → modelo=2218, tamaño=14
+    Parsea el código de botón que escribe el vendedor.
+    Códigos reales: B + modelo (4 o 5 dígitos) + tamaño (2 dígitos), con sufijo opcional.
+
+    - B221814-L  → modelo=2218,  tamaño=14, sufijo=l
+    - B221814    → modelo=2218,  tamaño=14
+    - B1000820   → modelo=10008, tamaño=20      (7 dígitos)
+    - B2218 / 2218   → modelo=2218               (4 dígitos)
+    - B10008 / 10008 → modelo=10008              (5 dígitos)
+    - B2954-13X18    → modelo=2954, sufijo=13x18
+    Cantidades ("1728 piezas", "1000 mazos") NO se toman como modelo.
     """
     resultado = {"modelo": None, "tamaño": None, "sufijo": None}
 
-    # Formato completo con sufijo: B221814-L o B221814-SPL
-    m = re.search(r'\bB(\d{4})(\d{2})[-]([A-Za-z0-9]{1,5})\b', texto, re.IGNORECASE)
-    if m:
-        resultado["modelo"] = m.group(1)
-        resultado["tamaño"] = m.group(2)
-        resultado["sufijo"] = m.group(3).lower()
+    m = re.search(
+        r'\bB?(\d{4,7})'                                       # dígitos del código
+        r'(?:-([A-Za-z0-9]{1,6}(?:-[A-Za-z0-9]{1,6})?))?'      # sufijo: -L, -SPL, -4-SPL, -13X18
+        r'\b(?!\s*(?:mazos?|gruesas?|piezas?|pzs?|unidades|rollos?|metros?|mts?)\b)',
+        texto, re.IGNORECASE)
+    if not m:
         return resultado
 
-    # 6 dígitos con sufijo sin B: 221814-L
-    m = re.search(r'\b(\d{4})(\d{2})[-]([A-Za-z0-9]{1,5})\b', texto)
-    if m:
-        resultado["modelo"] = m.group(1)
-        resultado["tamaño"] = m.group(2)
-        resultado["sufijo"] = m.group(3).lower()
-        return resultado
-
-    # 6 dígitos sin sufijo: B221814 o 221814
-    m = re.search(r'\bB?(\d{4})(\d{2})\b', texto, re.IGNORECASE)
-    if m:
-        resultado["modelo"] = m.group(1)
-        resultado["tamaño"] = m.group(2)
-        return resultado
-
-    # Solo modelo 4 dígitos con sufijo: B2218-L o 2218-L
-    m = re.search(r'\bB?(\d{4})[-]([A-Za-z0-9]{1,5})\b', texto, re.IGNORECASE)
-    if m:
-        resultado["modelo"] = m.group(1)
+    digitos = m.group(1)
+    if m.group(2):
         resultado["sufijo"] = m.group(2).lower()
-        return resultado
 
-    # Solo modelo 4 dígitos: B2218 o 2218
-    m = re.search(r'\bB?(\d{4})\b', texto, re.IGNORECASE)
-    if m:
-        resultado["modelo"] = m.group(1)
-        return resultado
-
+    if len(digitos) in (6, 7):          # modelo + tamaño
+        resultado["modelo"] = digitos[:-2]
+        resultado["tamaño"] = digitos[-2:]
+    else:                               # 4 o 5 dígitos: solo modelo
+        resultado["modelo"] = digitos
     return resultado
 
 
@@ -324,6 +312,13 @@ def buscar_botones(pregunta: str, pregunta_lower: str, palabras: list) -> list:
 
         data = query.order("Stock_Mazos", desc=True).limit(150).execute().data or []
 
+        # Solo modelo ("1523"): preferir B1523xx sobre B15238xx (otro modelo de 5 dígitos)
+        if modelo and not tamaño:
+            exactos = [r for r in data
+                       if re.match(rf"^B{modelo}\d{{2}}(-|$)", str(r.get("Modelo", "")), re.I)]
+            if exactos:
+                data = exactos
+
         # Tamaño sin modelo ("plata vieja 18"): filtra por la columna Tamaño
         if tamaño and not modelo:
             def _tam(r):
@@ -353,7 +348,16 @@ def buscar_botones(pregunta: str, pregunta_lower: str, palabras: list) -> list:
                 except:
                     pass
         unicos = {r["id"]: r for r in resultados}
-        return list(unicos.values())[:6], ""
+        ordenados = sorted(unicos.values(), key=lambda r: r.get("Stock_Mazos") or 0, reverse=True)
+        return ordenados[:6], ""
+
+    # Código completo con sufijo (B221814-L, B2954-13X18): primero busca el código exacto
+    if modelo and sufijo:
+        exacto = (supabase.table("inventario_botones").select("*")
+                  .ilike("Modelo", f"B{modelo}{tamaño or ''}-{sufijo}%")
+                  .order("Stock_Mazos", desc=True).limit(6).execute().data or [])
+        if exacto:
+            return exacto, ""
 
     data = ejecutar(con_tono=True)
 
@@ -366,6 +370,17 @@ def buscar_botones(pregunta: str, pregunta_lower: str, palabras: list) -> list:
                     f"Tonos disponibles: {', '.join(tonos_hay) or 'sin tono registrado'}. "
                     f"Avísalo primero y luego muestra estas opciones.")
             return alternativas[:6], nota
+
+    # Código con sufijo que no existe (B221814-L): mostrar lo que sí hay de ese modelo
+    if not data and modelo and sufijo:
+        base_cod = f"B{modelo}{tamaño or ''}"
+        parecidos = (supabase.table("inventario_botones").select("*")
+                     .ilike("Modelo", f"{base_cod}%")
+                     .order("Stock_Mazos", desc=True).limit(6).execute().data or [])
+        if parecidos:
+            nota = (f"El código exacto {base_cod}-{sufijo.upper()} NO existe. "
+                    f"Avísalo primero y luego muestra estas variantes de {base_cod} que sí hay.")
+            return parecidos, nota
 
     return data[:6], ""
 
@@ -411,9 +426,6 @@ def buscar_merceria(pregunta: str, pregunta_lower: str, palabras: list) -> list:
         query = query.ilike("Modelo", f"%{base}%")
     if color:
         query = query.ilike("Color", f"%{patron_sin_acentos(color)}%")
-    if producto and not base:
-        # vocales → _ para que "elastico" encuentre "Elástico"
-        query = query.ilike("Descripción", f"%{re.sub(r'[aeiouáéíóú]', '_', producto)}%")
     if medida:
         query = query.ilike("Medida", f"%{medida}%")
     if stock_minimo:
@@ -433,10 +445,19 @@ def buscar_merceria(pregunta: str, pregunta_lower: str, palabras: list) -> list:
                 except:
                     pass
         unicos = {r["id"]: r for r in resultados}
-        return list(unicos.values())[:6], ""
+        ordenados = sorted(unicos.values(), key=lambda r: r.get("Stock") or 0, reverse=True)
+        return ordenados[:6], ""
 
-    data = query.order("Stock", desc=True).limit(6).execute().data or []
-    return data, ""
+    data = query.order("Stock", desc=True).limit(200).execute().data or []
+
+    # Producto por palabra: se busca en Descripción y en TAGS, sin importar acentos
+    # ("elastico" encuentra "Elástico"; "bolsas" encuentra TAGS "sudaderas, pants, bolsas")
+    if producto and not base:
+        clave = sin_acentos(producto).rstrip("s")
+        data = [r for r in data
+                if clave in sin_acentos(f"{r.get('Descripción') or ''} {r.get('TAGS') or ''}")]
+
+    return data[:6], ""
 
 
 # ===========================================================
@@ -595,6 +616,7 @@ REGLAS:
 5. STOCK MERCERÍA: columna 'Stock' en piezas/rollos/metros.
 6. Si Stock_Mazos = 0 o Stock = 0 → "Sin stock" y muestra fecha_llegada si existe.
 7. Usa SOLO los campos presentes en los datos (no inventes).
+7b. Respeta el ORDEN del inventario: ya viene de mayor a menor existencia. No lo reordenes.
 8. CAMPOS VACÍOS: si un campo NO viene en el registro, OMITE esa línea completa.
    No escribas "N/A", "Sin dato", "Sin imagen", "Sin fecha" ni dejes la etiqueta vacía.
    Ejemplo: si un botón no trae 'Hoyos', no pongas la línea ⚪ Hoyos.
